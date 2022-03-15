@@ -19,4 +19,5 @@ Design trade-offs:
 - If the queue system (Redis) itself fails, all in-flight messages are lost and
   the message publisher(s) must repopulate the queue based on current state (via
   a backend DB).
-- 
+- If all worker processes fail simultaneously, no recovery is possible. An external
+  process would need to monitor for this unlikely condition.
