@@ -7,17 +7,25 @@
 #include <condition_variable>
 #include <memory>
 
+/*
+TODO / Think about
+
+- what if client acks with wrong/stale ID and acks another workers message?
+- is a too may retry fail state needed? workers should detect/report failure to DB state
+*/
+
 class Queue {
 public:
     struct Msg_t {
         std::string     id;
-        std::string     payload;
+        std::string     data;
     };
 
-    /*typedef struct {
-        std::string     id;
-        std::string     payload;
-    } Msg_t;*/
+    enum MsgState_t {
+        MSG_DONE,
+        MSG_CONT,
+        MSG_FAIL
+    };
 
     typedef std::shared_ptr<Msg_t> pMsg_t;
     typedef std::vector<std::string> MsgIdList_t;
@@ -26,11 +34,12 @@ public:
     ~Queue();
 
     // API for publisher
-    void push( const std::string & a_id, const std::string & a_payload, uint8_t a_priority );
+    void push( const std::string & a_id, const std::string & a_data, uint8_t a_priority );
 
     // API for consumer
     pMsg_t pop();
-    //pMsg_t ackPop( const std::string & a_id, bool a_success );
+    void   ack( const std::string & a_id, MsgState_t a_state );
+    pMsg_t popAck( const std::string & a_id, MsgState_t a_state );
 
     // API for monitoring
     size_t getMessageCount();
@@ -50,12 +59,14 @@ private:
     };
 
     typedef std::vector<std::deque<MsgEntry_t*>> queue_store_t;
-    typedef std::map<std::string,MsgEntry_t*> queue_state_t;
+    typedef std::map<std::string,MsgEntry_t*> msg_state_t;
+
+    pMsg_t popImpl( std::unique_lock<std::mutex> & a_lock );
 
     std::mutex                  m_mutex;
     std::condition_variable     m_cv;
-    size_t                      m_msg_capacity;
-    size_t                      m_msg_count;
-    queue_state_t               m_msg_state;
+    size_t                      m_capacity;
+    size_t                      m_count_queued;
+    msg_state_t                 m_messages;
     queue_store_t               m_queues;
 };
