@@ -4,30 +4,30 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <random>
 #include "Queue.hpp"
 
 #define WORKER_COUNT    8
 #define PROC_COUNT      10
-#define MSG_COUNT       10000
+#define MSG_COUNT       250
 
 using namespace std;
 
 size_t g_tot_procs = 0;
 map<string,vector<size_t>> g_msgs;
+mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
 
-Queue::MsgState_t
+bool
 handleMsg( Queue::pMsg_t & msg, size_t id ) {
     g_tot_procs++;
     vector<size_t> & count = g_msgs[msg->id];
-    //g_msg[msg->id][0]++;
-    //g_msg[msg->id][id]++;
 
     count[id]++;
 
-    if ( ++count[0] > PROC_COUNT ) {
-        return Queue::MSG_DONE;
+    if ( ++count[0] == PROC_COUNT ) {
+        return false;
     } else {
-        return Queue::MSG_CONT;
+        return true;
     }
 }
 
@@ -35,18 +35,32 @@ void workerThread( Queue & queue, size_t id ) {
     cout << "worker " << id << endl;
 
     Queue::pMsg_t msg = queue.pop();
-    Queue::MsgState_t state = handleMsg( msg, id );
+    size_t ms, loc_count = 0;
+    bool cont;
 
-    while ( true ) {
-        msg = queue.popAck( msg->id, state );
-
+    do {
         if ( msg->id == "exit" ){
-            cout << "worker exit " << id << endl;
-            queue.ack( msg->id, Queue::MSG_CONT );
+            cout << "worker " << id << " exit, count: " << loc_count << endl;
+            queue.ack( msg->id, true );
             return;
         }else {
-            state = handleMsg( msg, id );
+            ms = rng() & 0x1F; // 0 - 32 msec delay
+            this_thread::sleep_for(chrono::milliseconds( ms ));
+            cont = handleMsg( msg, id );
+            loc_count++;
         }
+        msg = queue.popAck( msg->id, cont );
+    } while ( true );
+}
+
+void printStats(){
+    vector<size_t>::iterator i;
+    for ( map<string,vector<size_t>>::iterator m = g_msgs.begin(); m != g_msgs.end(); m++ ) {
+        cout << m->first << " :";
+        for ( i = m->second.begin(); i != m->second.end(); i++ ) {
+            cout << "  " << *i;
+        }
+        cout << "\n";
     }
 }
 
@@ -88,13 +102,17 @@ int main( int argc, char ** argv ) {
         this_thread::sleep_for(chrono::milliseconds( 5 ));
     }
 
-    //for ( i = 0; i < WORKER_COUNT; i++ ) {
-        q.push("exit",string(),0);
-    //}
+    while ( q.getMessageCount() == 100 ) {
+        this_thread::sleep_for(chrono::milliseconds( 10 ));
+    }
+
+    q.push("exit",string(),0);
 
     cout << "wait for workers" << endl;
 
     for ( i = 0; i < WORKER_COUNT; i++ ) {
         workers[i]->join();
     }
+
+    printStats();
 }

@@ -21,11 +21,6 @@ public:
         std::string     data;
     };
 
-    enum MsgState_t {
-        MSG_DONE,
-        MSG_CONT,
-        MSG_FAIL
-    };
 
     typedef std::shared_ptr<Msg_t> pMsg_t;
     typedef std::vector<std::string> MsgIdList_t;
@@ -38,8 +33,8 @@ public:
 
     // API for consumer
     pMsg_t pop();
-    void   ack( const std::string & a_id, MsgState_t a_state );
-    pMsg_t popAck( const std::string & a_id, MsgState_t a_state );
+    void   ack( const std::string & a_id, bool a_requeue = false );
+    pMsg_t popAck( const std::string & a_id, bool a_requeue = false );
 
     // API for monitoring
     size_t getMessageCount();
@@ -48,6 +43,11 @@ public:
 
 private:
     typedef std::chrono::time_point<std::chrono::system_clock> timestamp_t;
+
+    enum MsgState_t {
+        MSG_DONE,
+        MSG_CONT
+    };
 
     struct MsgEntry_t {
         uint8_t                 priority;   ///< Message priority
@@ -62,6 +62,7 @@ private:
     typedef std::map<std::string,MsgEntry_t*> msg_state_t;
 
     pMsg_t popImpl( std::unique_lock<std::mutex> & a_lock );
+    void ackImpl( const std::string & a_id, bool a_requeue );
 
     std::mutex                  m_mutex;
     std::condition_variable     m_cv;

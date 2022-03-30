@@ -55,7 +55,6 @@ Queue::pMsg_t
 Queue::popImpl( unique_lock<mutex> & a_lock ) {
     // Lock must be held before calling
 
-    // m_msg_count is NOT the count of messages in the queue
     while ( !m_count_queued ) {
         m_cv.wait( a_lock );
     }
@@ -84,6 +83,26 @@ Queue::popImpl( unique_lock<mutex> & a_lock ) {
     return msg;
 }
 
+
+void
+Queue::ackImpl( const std::string & a_id, bool a_requeue ) {
+    // Lock must be held before calling
+
+    msg_state_t::iterator e = m_messages.find( a_id );
+    if ( e == m_messages.end() ) {
+        throw runtime_error( "No message found matching ID" );
+    }
+
+    if ( a_requeue ) {
+        e->second->active = false;
+        m_queues[e->second->priority].push_front( e->second );
+        m_count_queued++;
+        m_cv.notify_one();
+    } else {
+        m_messages.erase( e );
+    }
+}
+
 Queue::pMsg_t
 Queue::pop() {
     unique_lock<mutex> lock(m_mutex);
@@ -92,74 +111,21 @@ Queue::pop() {
 }
 
 void
-Queue::ack( const std::string & a_id, MsgState_t a_state ) {
+Queue::ack( const std::string & a_id, bool a_requeue ) {
     unique_lock<mutex> lock(m_mutex);
 
-    msg_state_t::iterator e = m_messages.find( a_id );
-    if ( e == m_messages.end() ) {
-        throw runtime_error( "No message found matching ID" );
-    }
-
-    switch ( a_state ) {
-        case MSG_DONE:
-            m_messages.erase( e );
-            break;
-        case MSG_CONT:
-            e->second->active = false;
-            m_queues[e->second->priority].push_back( e->second );
-            m_count_queued++;
-            m_cv.notify_one();
-            break;
-        case MSG_FAIL:
-            // This state is for retrying transient failures reported by workers
-            // Permanent failures will be stopped with the MSG_DONE state
-
-            if ( e->second->fail_count++ > MAX_FAIL ) {
-                // If too many failures, do not reschedule but keep in state to allow
-                // external monitor process to decide what to do
-                e->second->active = false;
-            }
-
-            break;
-    }
+    ackImpl( a_id, a_requeue );
 }
 
 
 Queue::pMsg_t
-Queue::popAck( const std::string & a_id, MsgState_t a_state ) {
+Queue::popAck( const std::string & a_id, bool a_requeue ) {
     unique_lock<mutex> lock(m_mutex);
 
-    msg_state_t::iterator e = m_messages.find( a_id );
-    if ( e == m_messages.end() ) {
-        throw runtime_error( "No message found matching ID" );
-    }
-
-    switch ( a_state ) {
-        case MSG_DONE:
-            m_messages.erase( e );
-            break;
-        case MSG_CONT:
-            e->second->active = false;
-            m_queues[e->second->priority].push_back( e->second );
-            m_count_queued++;
-            m_cv.notify_one();
-            break;
-        case MSG_FAIL:
-            // This state is for retrying transient failures reported by workers
-            // Permanent failures will be stopped with the MSG_DONE state
-
-            if ( e->second->fail_count++ > MAX_FAIL ) {
-                // If too many failures, do not reschedule but keep in state to allow
-                // external monitor process to decide what to do
-                e->second->active = false;
-            }
-
-            break;
-    }
+    ackImpl( a_id, a_requeue );
 
     return popImpl( lock );
 }
-
 
 size_t
 Queue::getMessageCount() {
