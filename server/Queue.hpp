@@ -3,6 +3,7 @@
 #include <map>
 #include <deque>
 #include <chrono>
+#include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <memory>
@@ -12,6 +13,10 @@
 TODO / Think about
 - starved low priority messages
 - monitor / priority-boost thread
+- support minimum queue wait time option (for polling tasks)
+- Logging? Or registered error handlers?
+- Revisit deque or list / forward_list?
+- terminate mon thread w/o delay (use cv/notify)
 */
 
 class Queue {
@@ -25,7 +30,7 @@ public:
     typedef std::shared_ptr<Msg_t> pMsg_t;
     typedef std::vector<std::string> MsgIdList_t;
 
-    Queue( uint8_t a_priorities, size_t a_capacity );
+    Queue( uint8_t a_priorities, size_t a_capacity, size_t a_poll_interval = 5000, size_t a_fail_timeout = 30000 );
     ~Queue();
 
     // API for publisher
@@ -61,8 +66,7 @@ private:
         uint8_t                 priority;   ///< Message priority
         uint8_t                 fail_count; ///< Fail count
         MsgState_t              state;      ///< Queued, running, failed (for monitoring)
-        timestamp_t             ts_rcvd;    ///< Receive time needed for fair scheduling
-        timestamp_t             ts_run;     ///< Time when message started running (for monitoring)
+        timestamp_t             state_ts;   ///< Time when message changed state (for monitoring)
         pMsg_t                  message;    ///< Message (shared ptr)
     };
 
@@ -71,6 +75,7 @@ private:
 
     pMsg_t popImpl( std::unique_lock<std::mutex> & a_lock );
     void ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue );
+    void monitorThread();
 
     std::mutex                  m_mutex;
     std::condition_variable     m_cv;
@@ -79,4 +84,10 @@ private:
     msg_state_t                 m_messages;
     queue_store_t               m_queues;
     std::mt19937_64             m_rng;
+    size_t                      m_poll_interval;    ///< Internal monitoring poll interval in msec
+    size_t                      m_fail_timeout;     ///< Message ACK fail timeout in msec (max runtime)
+    size_t                      m_max_retries;
+    size_t                      m_boost_timeout;    ///< Message priority boost timeout in msec
+    std::thread                 m_monitor_thread;
+    bool                        m_run;
 };
