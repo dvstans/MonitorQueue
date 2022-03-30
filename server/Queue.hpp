@@ -10,7 +10,6 @@
 
 /*
 TODO / Think about
-
 - starved low priority messages
 - monitor / priority-boost thread
 */
@@ -22,7 +21,6 @@ public:
         uint64_t        token;
         std::string     data;
     };
-
 
     typedef std::shared_ptr<Msg_t> pMsg_t;
     typedef std::vector<std::string> MsgIdList_t;
