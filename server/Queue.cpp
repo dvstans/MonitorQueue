@@ -1,13 +1,15 @@
 #include <stdexcept>
-#include <iostream>
+//#include <iostream>
 #include "Queue.hpp"
 
 using namespace std;
 
-#define MAX_FAIL 10 // TODO put in config object
+//================================= PUBLIC METHODS ============================
 
 Queue::Queue( uint8_t a_priorities, size_t a_capacity ) :
-    m_capacity(a_capacity), m_count_queued(0)
+    m_capacity(a_capacity),
+    m_count_queued(0),
+    m_rng(chrono::steady_clock::now().time_since_epoch().count())
 {
     m_queues.resize( a_priorities );
 }
@@ -37,10 +39,10 @@ Queue::push( const std::string & a_id, const std::string & a_data, uint8_t a_pri
     MsgEntry_t * entry = new MsgEntry_t {
         a_priority,
         0,
-        false,
+        MSG_QUEUED,
         std::chrono::system_clock::now(),
         timestamp_t(),
-        make_shared<Msg_t>(Msg_t{ a_id, a_data })
+        make_shared<Msg_t>(Msg_t{ a_id, 0, a_data })
     };
 
     m_messages[a_id] = entry;
@@ -52,58 +54,6 @@ Queue::push( const std::string & a_id, const std::string & a_data, uint8_t a_pri
 }
 
 Queue::pMsg_t
-Queue::popImpl( unique_lock<mutex> & a_lock ) {
-    // Lock must be held before calling
-
-    while ( !m_count_queued ) {
-        m_cv.wait( a_lock );
-    }
-
-    MsgEntry_t * entry = 0;
-
-    for ( queue_store_t::iterator q = m_queues.begin(); q != m_queues.end(); ++q ){
-        if ( !q->empty() ){
-            entry = q->back();
-            q->pop_back();
-            break;
-        }
-    }
-
-    if ( !entry ) {
-        std::cout << "m_count_queued: " << m_count_queued << std::endl;
-        throw logic_error( "All queues empty when m_count_queued > 0" );
-    }
-
-    entry->active = true;
-    entry->ts_active = std::chrono::system_clock::now();
-    pMsg_t msg = entry->message;
-
-    m_count_queued--;
-
-    return msg;
-}
-
-
-void
-Queue::ackImpl( const std::string & a_id, bool a_requeue ) {
-    // Lock must be held before calling
-
-    msg_state_t::iterator e = m_messages.find( a_id );
-    if ( e == m_messages.end() ) {
-        throw runtime_error( "No message found matching ID" );
-    }
-
-    if ( a_requeue ) {
-        e->second->active = false;
-        m_queues[e->second->priority].push_front( e->second );
-        m_count_queued++;
-        m_cv.notify_one();
-    } else {
-        m_messages.erase( e );
-    }
-}
-
-Queue::pMsg_t
 Queue::pop() {
     unique_lock<mutex> lock(m_mutex);
 
@@ -111,18 +61,18 @@ Queue::pop() {
 }
 
 void
-Queue::ack( const std::string & a_id, bool a_requeue ) {
+Queue::ack( const std::string & a_id, uint64_t a_token, bool a_requeue ) {
     unique_lock<mutex> lock(m_mutex);
 
-    ackImpl( a_id, a_requeue );
+    ackImpl( a_id, a_token, a_requeue );
 }
 
 
 Queue::pMsg_t
-Queue::popAck( const std::string & a_id, bool a_requeue ) {
+Queue::popAck( const std::string & a_id, uint64_t a_token, bool a_requeue ) {
     unique_lock<mutex> lock(m_mutex);
 
-    ackImpl( a_id, a_requeue );
+    ackImpl( a_id, a_token, a_requeue );
 
     return popImpl( lock );
 }
@@ -144,4 +94,64 @@ Queue::getFailed() {
 void
 Queue::eraseFailed( const MsgIdList_t & a_msg_ids ) {
     lock_guard<mutex> lock(m_mutex);
+}
+
+//================================= PRIVATE METHODS ===========================
+
+Queue::pMsg_t
+Queue::popImpl( unique_lock<mutex> & a_lock ) {
+    // Lock must be held before calling
+
+    while ( !m_count_queued ) {
+        m_cv.wait( a_lock );
+    }
+
+    MsgEntry_t * entry = 0;
+
+    for ( queue_store_t::iterator q = m_queues.begin(); q != m_queues.end(); ++q ){
+        if ( !q->empty() ){
+            entry = q->back();
+            q->pop_back();
+            break;
+        }
+    }
+
+    if ( !entry ) {
+        //std::cout << "m_count_queued: " << m_count_queued << std::endl;
+        throw logic_error( "All queues empty when m_count_queued > 0" );
+    }
+
+    entry->state = MSG_RUNNING;
+    entry->ts_run = std::chrono::system_clock::now();
+    entry->message->token = m_rng();
+    pMsg_t msg = entry->message;
+
+    m_count_queued--;
+
+    return msg;
+}
+
+
+void
+Queue::ackImpl( const std::string & a_id, uint64_t a_token,  bool a_requeue ) {
+    // Lock must be held before calling
+
+    msg_state_t::iterator e = m_messages.find( a_id );
+    if ( e == m_messages.end() ) {
+        throw runtime_error( "No message found matching ID" );
+    }
+
+    if ( e->second->message->token != a_token ) {
+        throw runtime_error( "Invalid message token" );
+    }
+
+    if ( a_requeue ) {
+        e->second->state = MSG_QUEUED;
+        e->second->message->token = 0;
+        m_queues[e->second->priority].push_front( e->second );
+        m_count_queued++;
+        m_cv.notify_one();
+    } else {
+        m_messages.erase( e );
+    }
 }

@@ -41,7 +41,7 @@ void workerThread( Queue & queue, size_t id ) {
     do {
         if ( msg->id == "exit" ){
             cout << "worker " << id << " exit, count: " << loc_count << endl;
-            queue.ack( msg->id, true );
+            queue.ack( msg->id, msg->token, true );
             return;
         }else {
             ms = rng() & 0x1F; // 0 - 32 msec delay
@@ -49,7 +49,7 @@ void workerThread( Queue & queue, size_t id ) {
             cont = handleMsg( msg, id );
             loc_count++;
         }
-        msg = queue.popAck( msg->id, cont );
+        msg = queue.popAck( msg->id, msg->token, cont );
     } while ( true );
 }
 
