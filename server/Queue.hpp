@@ -49,7 +49,10 @@ public:
 
 
     // API for monitoring
-    size_t getMessageCount();
+    size_t count();
+    size_t freeCount();
+    size_t workingCount();
+    size_t failedCount();
     MsgIdList_t getFailed();
     void eraseFailed( const MsgIdList_t & a_msg_ids );
 
@@ -81,6 +84,7 @@ private:
     std::condition_variable     m_cv;
     size_t                      m_capacity;
     size_t                      m_count_queued;
+    size_t                      m_count_failed;
     msg_state_t                 m_messages;
     queue_store_t               m_queues;
     std::mt19937_64             m_rng;

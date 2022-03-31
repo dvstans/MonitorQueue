@@ -10,11 +10,12 @@ using namespace std;
 Queue::Queue( uint8_t a_priorities, size_t a_capacity, size_t a_poll_interval, size_t a_fail_timeout ) :
     m_capacity(a_capacity),
     m_count_queued(0),
+    m_count_failed(0),
     m_rng(chrono::steady_clock::now().time_since_epoch().count()),
     m_poll_interval( a_poll_interval ),
     m_fail_timeout( a_fail_timeout ),
-    m_max_retries( 10 ),
-    m_boost_timeout( 10000 ),
+    m_max_retries( 10 ), // TODO make config
+    m_boost_timeout( 1000 ), // TODO make config
     m_monitor_thread( &Queue::monitorThread, this ),
     m_run( true )
 {
@@ -86,10 +87,31 @@ Queue::popAck( const std::string & a_id, uint64_t a_token, bool a_requeue ) {
 }
 
 size_t
-Queue::getMessageCount() {
-    lock_guard<mutex> lock(m_mutex);
+Queue::count() {
+    //lock_guard<mutex> lock(m_mutex);
+    // TODO need locks?
     return m_messages.size();
 }
+
+size_t
+Queue::freeCount() {
+    // TODO need to use atomic int?
+    return m_capacity - m_messages.size();
+}
+
+size_t
+Queue::workingCount() {
+    // TODO need to use atomic int?
+    return m_messages.size() - m_count_failed;
+}
+
+size_t
+Queue::failedCount() {
+    // TODO need to use atomic int?
+    return m_count_failed;
+}
+
+// TODO Implement
 
 Queue::MsgIdList_t
 Queue::getFailed() {
@@ -102,6 +124,7 @@ Queue::getFailed() {
 void
 Queue::eraseFailed( const MsgIdList_t & a_msg_ids ) {
     lock_guard<mutex> lock(m_mutex);
+    // TODO Implement - adjust failed count
 }
 
 //================================= PRIVATE METHODS ===========================
@@ -132,6 +155,7 @@ Queue::popImpl( unique_lock<mutex> & a_lock ) {
     entry->state = MSG_RUNNING;
     entry->state_ts = std::chrono::system_clock::now();
     entry->message->token = m_rng();
+    //cout << "<-- " << entry->message->id << " " << entry->message->token << endl;
     pMsg_t msg = entry->message;
 
     m_count_queued--;
@@ -194,10 +218,11 @@ Queue::monitorThread() {
         for ( m = m_messages.begin(); m != m_messages.end(); m++ ) {
             if ( m->second->state == MSG_RUNNING ) {
                 if ( m->second->state_ts < fail_time ) {
-                    cout << "msg worker timeout: " << m->first << "\n";
                     if ( ++m->second->fail_count == m_max_retries ) {
                         // Fail message
                         m->second->state = MSG_FAILED;
+                        m_count_failed++;
+                        cout << "FAIL MSG ID " << m->first << "\n";
                     } else {
                         // Retry message
                         m->second->state = MSG_QUEUED;
@@ -205,6 +230,7 @@ Queue::monitorThread() {
                         m_queues[m->second->priority].push_front( m->second );
                         m_count_queued++;
                         notify++;
+                        cout << "RETRY MSG ID " << m->first << "\n";
                     }
                 }
             } else if ( m->second->state == MSG_QUEUED ) {
