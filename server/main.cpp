@@ -1,4 +1,3 @@
-//#include "QueueServer.hpp"
 #include <iostream>
 #include <map>
 #include <vector>
@@ -22,12 +21,12 @@ struct HandlerStats {
 
     std::atomic<int>    total;
     vector<size_t>      worker;
+    vector<size_t>      proc_order;
 };
 
 
 map<string,HandlerStats> g_stats;
 mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
-
 
 void workerThread( Queue & queue, size_t id ) {
     cout << "worker " << id << endl;
@@ -37,11 +36,13 @@ void workerThread( Queue & queue, size_t id ) {
     bool cont, fail;
     string msg_id;
     uint64_t msg_tok;
+    chrono::time_point<chrono::system_clock> now;
 
     do {
         // For debug only...
         msg_id = msg->id;
         msg_tok = msg->token;
+        now = chrono::system_clock::now();
 
         if ( msg->id == "exit" ){
             cout << "worker " << id << " exit, count: " << loc_count << endl;
@@ -77,10 +78,11 @@ void workerThread( Queue & queue, size_t id ) {
                 cout << "worker " << id << " EXPECTED AN EXCEPTION!!!\n";
                 cout << "  msg ID: " << msg_id << ", tok: " << msg_tok << endl;
             }
-            loc_count++;
-            g_tot_procs++;
             stats.total++;
             stats.worker[id]++;
+            stats.proc_order.push_back( g_tot_procs );
+            loc_count++;
+            g_tot_procs++;
         } catch ( exception & e ) {
             //cout << "worker " << id << " popAck exception" << endl;
             if ( !fail ) {
@@ -95,33 +97,35 @@ void workerThread( Queue & queue, size_t id ) {
 }
 
 void printStats(){
-    vector<size_t>::iterator i;
+    vector<size_t>::iterator i,o;
+
     for ( map<string,HandlerStats>::iterator m = g_stats.begin(); m != g_stats.end(); m++ ) {
         cout << m->first << " : (" << m->second.total << ") ";
         for ( i = m->second.worker.begin(); i != m->second.worker.end(); i++ ) {
             cout << "  " << *i;
         }
         cout << "\n";
+
+        for ( o = m->second.proc_order.begin(); o != m->second.proc_order.end(); o++ ) {
+            cout << "  " << *o;
+        }
+
+        cout << "\n";
     }
 }
 
 int main( int argc, char ** argv ) {
-    //QueueServer qs;
-    //qs.listen();
-
     size_t  i, j;
-    Queue   q( 3, 100, 5000, 1000 );
+    Queue   q( 3, 100, 250, 1000 );
 
     for ( i = 0; i < MSG_COUNT; i++ ) {
         g_stats[std::to_string(i)].worker.resize(WORKER_COUNT);
+        g_stats[std::to_string(i)].proc_order.reserve(PROC_COUNT);
     }
 
-    //q.push( "1", "data", 0 );
-    //Queue::pMsg_t msg = q.pop();
-    //cout << "ID: " << msg->id << ", data: " << msg->data << endl;
-
     for ( j = 0; j < 100; j++ ) {
-        q.push(std::to_string(j),string(),0);
+        // Make last 5 medium priority to test boost
+        q.push(std::to_string(j),string(), j > 95?1:0);
     }
 
     vector<thread*> workers;

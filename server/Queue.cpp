@@ -28,7 +28,6 @@ Queue::~Queue() {
     m_monitor_thread.join();
 
     // TODO deallocate all msg entries?
-    // m_msg_pool
 }
 
 void
@@ -193,6 +192,7 @@ Queue::ackImpl( const std::string & a_id, uint64_t a_token,  bool a_requeue ) {
     }
 
     if ( a_requeue ) {
+        e->second->boosted = false;
         e->second->state = MSG_QUEUED;
         e->second->message.token = 0;
         m_queue_list[e->second->priority].push_front( e->second );
@@ -250,10 +250,12 @@ Queue::monitorThread() {
                     }
                 }
             } else if ( m->second->state == MSG_QUEUED ) {
-                if ( m->second->priority > 0 && m->second->state_ts < boost_time ) {
+                if ( m->second->priority > 0 && !m->second->boosted && m->second->state_ts < boost_time ) {
                     // Find message in current queue
                     q = std::find( m_queue_list[m->second->priority].begin(), m_queue_list[m->second->priority].end(), m->second );
                     if ( q != m_queue_list[m->second->priority].end() ) {
+                        cout << "PRIORITY BOOST MSG ID " << m->first << "\n";
+                        m->second->boosted = true;
                         // Remove entry from current queue
                         m_queue_list[m->second->priority].erase( q );
                         // Push to front of high priority queue

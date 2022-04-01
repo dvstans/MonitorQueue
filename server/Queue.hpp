@@ -11,18 +11,14 @@
 
 /*
 TODO / Think about
-- starved low priority messages
-- monitor / priority-boost thread
+- test fail msg / recovery
 - support minimum queue wait time option (for polling tasks)
 - Logging? Or registered error handlers?
 - Revisit deque or list / forward_list?
-- terminate mon thread w/o delay (use cv/notify)
 */
 
 class Queue {
 public:
-    //typedef std::shared_ptr<std::string> spString_t;
-
     struct Msg_t {
         std::string     id;
         uint64_t        token;
@@ -69,6 +65,7 @@ private:
     struct MsgEntry_t {
         MsgEntry_t( const std::string & a_id, const std::string & a_data, uint8_t a_priority ) :
             priority( a_priority ),
+            boosted( false ),
             fail_count( 0 ),
             state( MSG_QUEUED ),
             state_ts( std::chrono::system_clock::now() ),
@@ -77,6 +74,7 @@ private:
 
         void reset( const std::string & a_id, const std::string & a_data, uint8_t a_priority ) {
             priority = a_priority;
+            boosted = false;
             fail_count = 0;
             state = MSG_QUEUED;
             state_ts = std::chrono::system_clock::now();
@@ -86,6 +84,7 @@ private:
         }
 
         uint8_t                 priority;   ///< Message priority
+        bool                    boosted;    ///< True if priority has been boosted
         uint8_t                 fail_count; ///< Fail count
         MsgState_t              state;      ///< Queued, running, failed (for monitoring)
         timestamp_t             state_ts;   ///< Time when message changed state (for monitoring)
