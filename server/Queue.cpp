@@ -67,18 +67,18 @@ Queue::pop() {
 }
 
 void
-Queue::ack( const std::string & a_id, uint64_t a_token, bool a_requeue ) {
+Queue::ack( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_requeue_delay ) {
     unique_lock<mutex> lock(m_mutex);
 
-    ackImpl( a_id, a_token, a_requeue );
+    ackImpl( a_id, a_token, a_requeue, a_requeue_delay );
 }
 
 
 const Queue::Msg_t &
-Queue::popAck( const std::string & a_id, uint64_t a_token, bool a_requeue ) {
+Queue::popAck( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_requeue_delay ) {
     unique_lock<mutex> lock(m_mutex);
 
-    ackImpl( a_id, a_token, a_requeue );
+    ackImpl( a_id, a_token, a_requeue, a_requeue_delay );
 
     return popImpl( lock );
 }
@@ -175,8 +175,11 @@ Queue::popImpl( unique_lock<mutex> & a_lock ) {
 
 
 void
-Queue::ackImpl( const std::string & a_id, uint64_t a_token,  bool a_requeue ) {
+Queue::ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_requeue_delay ) {
     // Lock must be held before calling
+
+    // TODO Implement delay queue
+    (void) a_requeue_delay;
 
     msg_map_t::iterator e = m_msg_map.find( a_id );
     if ( e == m_msg_map.end() ) {

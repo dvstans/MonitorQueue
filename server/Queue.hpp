@@ -35,8 +35,8 @@ public:
 
     // API for consumer
     const Msg_t &   pop();
-    void            ack( const std::string & a_id, uint64_t a_token, bool a_requeue = false );
-    const Msg_t &   popAck( const std::string & a_id, uint64_t a_token, bool a_requeue = false );
+    void            ack( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_requeue_delay = 0 );
+    const Msg_t &   popAck( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_requeue_delay = 0 );
 
     // Prevent implcit conversions of token types on Ack methods
     template <typename T>
@@ -97,7 +97,7 @@ private:
 
     MsgEntry_t * getMsgEntry( const std::string & a_id, const std::string & a_data, uint8_t a_priority );
     const Msg_t & popImpl( std::unique_lock<std::mutex> & a_lock );
-    void ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue );
+    void ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_requeue_delay );
     void monitorThread();
 
     std::mutex                  m_mutex;
