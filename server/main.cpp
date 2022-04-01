@@ -14,8 +14,6 @@
 
 using namespace std;
 
-//size_t g_tot_procs = 0;
-//size_t g_tot_err = 0;
 std::atomic<int> g_tot_procs{0};
 std::atomic<int> g_tot_timeout{0};
 
@@ -26,7 +24,7 @@ struct HandlerStats {
     vector<size_t>      worker;
 };
 
-//map<string,vector<size_t>> g_msgs;
+
 map<string,HandlerStats> g_stats;
 mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
 
@@ -34,7 +32,6 @@ mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
 void workerThread( Queue & queue, size_t id ) {
     cout << "worker " << id << endl;
 
-    // COPY the message - do NOT hold the pointer as they are shared
     const Queue::Msg_t * msg = &queue.pop();
     size_t ms, loc_count = 0;
     bool cont, fail;
@@ -113,7 +110,7 @@ int main( int argc, char ** argv ) {
     //qs.listen();
 
     size_t  i, j;
-    Queue   q( 3, 100, 250, 1000 );
+    Queue   q( 3, 100, 5000, 1000 );
 
     for ( i = 0; i < MSG_COUNT; i++ ) {
         g_stats[std::to_string(i)].worker.resize(WORKER_COUNT);

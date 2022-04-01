@@ -17,7 +17,6 @@ TODO / Think about
 - Logging? Or registered error handlers?
 - Revisit deque or list / forward_list?
 - terminate mon thread w/o delay (use cv/notify)
-- use pool for MsgEntry structs
 */
 
 class Queue {
@@ -116,5 +115,6 @@ private:
     size_t                      m_max_retries;
     size_t                      m_boost_timeout;    ///< Message priority boost timeout in msec
     std::thread                 m_monitor_thread;
+    std::condition_variable     m_mon_cv;
     bool                        m_run;
 };

@@ -24,6 +24,7 @@ Queue::Queue( uint8_t a_priorities, size_t a_capacity, size_t a_poll_interval, s
 
 Queue::~Queue() {
     m_run = false;
+    m_mon_cv.notify_one();
     m_monitor_thread.join();
 
     // TODO deallocate all msg entries?
@@ -213,9 +214,14 @@ Queue::monitorThread() {
     size_t notify;
 
     while ( m_run ) {
-        this_thread::sleep_for( poll_ms );
+        //this_thread::sleep_for( poll_ms );
 
         unique_lock<mutex> lock( m_mutex );
+        m_mon_cv.wait_for( lock, poll_ms );
+
+        if ( !m_run ){
+            return;
+        }
 
         now = std::chrono::system_clock::now();
         fail_time = now - std::chrono::milliseconds(m_fail_timeout);
