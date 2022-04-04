@@ -1,6 +1,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <deque>
 #include <chrono>
 #include <thread>
@@ -12,8 +13,7 @@
 /*
 TODO / Think about
 - support minimum queue wait time option (for polling tasks)
-- Logging? Or registered error handlers?
-- Revisit deque or list / forward_list?
+- Need to free memory
 */
 
 class Queue {
@@ -60,6 +60,7 @@ private:
     enum MsgState_t {
         MSG_QUEUED,
         MSG_RUNNING,
+        MSG_DELAYED,
         MSG_FAILED
     };
 
@@ -89,17 +90,29 @@ private:
         uint8_t                 fail_count; ///< Fail count
         MsgState_t              state;      ///< Queued, running, failed (for monitoring)
         timestamp_t             state_ts;   ///< Time when message changed state (for monitoring)
+        timestamp_t             delay_ts;   ///< Delay time when message should (re)queued
         Msg_t                   message;    ///< Message (shared ptr)
+    };
+
+    struct DelaySetCompare final
+    {
+        bool operator() ( const MsgEntry_t * left, const MsgEntry_t * right) const
+        {
+            return left->delay_ts < right->delay_ts;
+        }
     };
 
     typedef std::vector<std::deque<MsgEntry_t*>> queue_list_t;
     typedef std::map<std::string,MsgEntry_t*> msg_map_t;
+    typedef std::set<MsgEntry_t*,DelaySetCompare> msg_delay_t;
     typedef std::vector<MsgEntry_t*> msg_pool_t;
 
     MsgEntry_t * getMsgEntry( const std::string & a_id, const std::string & a_data, uint8_t a_priority );
     const Msg_t & popImpl( std::unique_lock<std::mutex> & a_lock );
     void ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_requeue_delay );
+    void insertDelayedMsg( MsgEntry_t * a_msg, const timestamp_t & a_requeue_ts  );
     void monitorThread();
+    void delayThread();
 
     std::mutex                  m_mutex;
     std::condition_variable     m_cv;
@@ -108,6 +121,7 @@ private:
     size_t                      m_count_failed;
     msg_pool_t                  m_msg_pool;
     msg_map_t                   m_msg_map;
+    msg_delay_t                 m_msg_delay;
     queue_list_t                m_queue_list;
     std::mt19937_64             m_rng;
     size_t                      m_poll_interval;    ///< Internal monitoring poll interval in msec
@@ -116,6 +130,8 @@ private:
     size_t                      m_boost_timeout;    ///< Message priority boost timeout in msec
     std::thread                 m_monitor_thread;
     std::condition_variable     m_mon_cv;
+    std::thread                 m_delay_thread;
+    std::condition_variable     m_delay_cv;
     bool                        m_run;
     ErrorCB_t                 * m_err_cb;
 };

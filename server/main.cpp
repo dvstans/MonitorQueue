@@ -77,7 +77,7 @@ void workerThread( Queue & queue, size_t id ) {
         }
 
         try {
-            msg = &queue.popAck( msg_id, msg_tok, cont );
+            msg = &queue.popAck( msg_id, msg_tok, cont, (ms & 0xF) == 0xF?5000:0 );
             if ( fail ) {
                 cout << "worker " << id << " EXPECTED AN EXCEPTION!!!\n";
                 cout << "  msg ID: " << msg_id << ", tok: " << msg_tok << endl;

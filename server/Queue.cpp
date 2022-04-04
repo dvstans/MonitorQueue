@@ -16,7 +16,9 @@ Queue::Queue( uint8_t a_priorities, size_t a_capacity, size_t a_poll_interval, s
     m_max_retries( 10 ), // TODO make config
     m_boost_timeout( 1000 ), // TODO make config
     m_monitor_thread( &Queue::monitorThread, this ),
-    m_run( true )
+    m_delay_thread( &Queue::delayThread, this ),
+    m_run( true ),
+    m_err_cb( 0 )
 {
     m_queue_list.resize( a_priorities );
 }
@@ -24,9 +26,11 @@ Queue::Queue( uint8_t a_priorities, size_t a_capacity, size_t a_poll_interval, s
 Queue::~Queue() {
     m_run = false;
     m_mon_cv.notify_one();
+    m_delay_cv.notify_one();
     m_monitor_thread.join();
+    m_delay_thread.join();
 
-    // TODO deallocate all msg entries?
+    // TODO - Need to free memory
 }
 
 void
@@ -204,9 +208,6 @@ void
 Queue::ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_requeue_delay ) {
     // Lock must be held before calling
 
-    // TODO Implement delay queue
-    (void) a_requeue_delay;
-
     msg_map_t::iterator e = m_msg_map.find( a_id );
     if ( e == m_msg_map.end() ) {
         throw runtime_error( "No message found matching ID" );
@@ -221,18 +222,40 @@ Queue::ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size
     }
 
     if ( a_requeue ) {
+        timestamp_t now = std::chrono::system_clock::now();
+
         e->second->boosted = false;
-        e->second->state = MSG_QUEUED;
         e->second->message.token = 0;
-        m_queue_list[e->second->priority].push_front( e->second );
-        m_count_queued++;
-        m_cv.notify_one();
+
+        if ( a_requeue_delay ) {
+            insertDelayedMsg( e->second, now + std::chrono::milliseconds( a_requeue_delay ));
+        } else {
+            m_count_queued++;
+            e->second->state = MSG_QUEUED;
+            e->second->state_ts = now;
+            m_queue_list[e->second->priority].push_front( e->second );
+            m_cv.notify_one();
+        }
+
     } else {
         m_msg_pool.push_back( e->second );
         m_msg_map.erase( e );
     }
 }
 
+void
+Queue::insertDelayedMsg( MsgEntry_t * a_msg, const timestamp_t & a_requeue_ts ) {
+    // Lock must be held before calling
+
+    a_msg->state = MSG_DELAYED;
+    a_msg->state_ts = a_requeue_ts;
+
+    m_msg_delay.insert( a_msg );
+
+    if ( *m_msg_delay.begin() == a_msg ) {
+        m_delay_cv.notify_one();
+    }
+}
 
 void
 Queue::monitorThread() {
@@ -242,14 +265,17 @@ Queue::monitorThread() {
     deque<MsgEntry_t*>::iterator q;
     size_t notify;
 
-    while ( m_run ) {
-        //this_thread::sleep_for( poll_ms );
+    unique_lock<mutex> lock( m_mutex );
 
-        unique_lock<mutex> lock( m_mutex );
+    while ( m_run ) {
         m_mon_cv.wait_for( lock, poll_ms );
 
         if ( !m_run ){
             return;
+        }
+
+        if ( m_err_cb ) {
+            (*m_err_cb)( string("free: ") + to_string( freeCount()) + ", delayed: " + to_string( m_msg_delay.size() ));
         }
 
         now = std::chrono::system_clock::now();
@@ -309,6 +335,65 @@ Queue::monitorThread() {
             m_cv.notify_one();
         } else if ( notify > 1 ) {
             m_cv.notify_all();
+        }
+    }
+}
+
+void
+Queue::delayThread() {
+    timestamp_t now;
+    msg_delay_t::iterator m;
+
+    unique_lock<mutex> lock( m_mutex );
+
+    while ( m_run ) {
+        // Calc delay time and (maybe) go to sleep
+        if ( m_msg_delay.size() ) {
+            now = std::chrono::system_clock::now();
+            m = m_msg_delay.begin();
+            if ( (*m)->state_ts > now ) {
+                if ( m_err_cb ) {
+                    (*m_err_cb)( "Waiting w/ timeout" );
+                }
+
+                m_delay_cv.wait_for( lock, (*m)->state_ts - now );
+            }
+        } else {
+            if ( m_err_cb ) {
+                (*m_err_cb)( "Waiting w/o timeout" );
+            }
+            m_delay_cv.wait( lock );
+        }
+
+        if ( !m_run ){
+            return;
+        }
+
+        // See if one or messages are ready to queue
+        if ( m_msg_delay.size() ) {
+            now = std::chrono::system_clock::now();
+
+            while ( m_msg_delay.size() ) {
+                m = m_msg_delay.begin();
+
+                if ( (*m)->state_ts <= now ) {
+                    if ( m_err_cb ) {
+                        (*m_err_cb)( string("Queuing delayed msg ID ") + (*m)->message.id );
+                    }
+
+                    // Msg is ready, push to queue
+                    (*m)->state = MSG_QUEUED;
+                    (*m)->state_ts = now;
+                    m_queue_list[(*m)->priority].push_back( *m );
+                    m_count_queued++;
+                    m_cv.notify_one();
+
+                    // Remove from delay set
+                    m_msg_delay.erase( m );
+                } else {
+                    break;
+                }
+            }
         }
     }
 }
