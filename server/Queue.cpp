@@ -1,6 +1,5 @@
 #include <stdexcept>
 #include <algorithm>
-#include <iostream>
 #include "Queue.hpp"
 
 using namespace std;
@@ -108,21 +107,49 @@ Queue::failedCount() {
     return m_count_failed;
 }
 
-// TODO Implement
-
 Queue::MsgIdList_t
 Queue::getFailed() {
     MsgIdList_t failed;
+    failed.reserve( m_count_failed );
 
     lock_guard<mutex> lock(m_mutex);
+
+    for ( msg_map_t::iterator m = m_msg_map.begin(); m != m_msg_map.end(); m++ ) {
+        if ( m->second->state == MSG_FAILED ) {
+            failed.push_back( m->first );
+        }
+    }
+
+    return failed;
+}
+
+Queue::MsgIdList_t
+Queue::eraseFailed( const MsgIdList_t & a_msg_ids ) {
+    MsgIdList_t failed;
+    failed.reserve( m_count_failed );
+
+    lock_guard<mutex> lock(m_mutex);
+    msg_map_t::iterator m;
+
+    for ( MsgIdList_t::const_iterator i = a_msg_ids.begin(); i != a_msg_ids.end(); i++ ) {
+        m = m_msg_map.find( *i );
+        if ( m != m_msg_map.end() ) {
+            if ( m->second->state == MSG_FAILED ) {
+                failed.push_back( m->first );
+                m_msg_pool.push_back( m->second );
+                m_msg_map.erase( m );
+            }
+        }
+    }
+
     return failed;
 }
 
 void
-Queue::eraseFailed( const MsgIdList_t & a_msg_ids ) {
-    lock_guard<mutex> lock(m_mutex);
-    // TODO Implement - adjust failed count
+Queue::setErrorCallback( ErrorCB_t * a_callback ) {
+    m_err_cb = a_callback;
 }
+
 
 //================================= PRIVATE METHODS ===========================
 
@@ -161,7 +188,6 @@ Queue::popImpl( unique_lock<mutex> & a_lock ) {
     }
 
     if ( !entry ) {
-        //std::cout << "m_count_queued: " << m_count_queued << std::endl;
         throw logic_error( "All queues empty when m_count_queued > 0" );
     }
 
@@ -241,7 +267,9 @@ Queue::monitorThread() {
                         // Fail message
                         m->second->state = MSG_FAILED;
                         m_count_failed++;
-                        cout << "FAIL MSG ID " << m->first << "\n";
+                        if ( m_err_cb ) {
+                            (*m_err_cb)( string("FAIL MSG ID ") + m->first );
+                        }
                     } else {
                         // Retry message
                         m->second->state = MSG_QUEUED;
@@ -249,7 +277,10 @@ Queue::monitorThread() {
                         m_queue_list[m->second->priority].push_front( m->second );
                         m_count_queued++;
                         notify++;
-                        cout << "RETRY MSG ID " << m->first << "\n";
+
+                        if ( m_err_cb ) {
+                            (*m_err_cb)( string("RETRY MSG ID ") + m->first );
+                        }
                     }
                 }
             } else if ( m->second->state == MSG_QUEUED ) {
@@ -257,15 +288,18 @@ Queue::monitorThread() {
                     // Find message in current queue
                     q = std::find( m_queue_list[m->second->priority].begin(), m_queue_list[m->second->priority].end(), m->second );
                     if ( q != m_queue_list[m->second->priority].end() ) {
-                        cout << "PRIORITY BOOST MSG ID " << m->first << "\n";
+                        if ( m_err_cb ) {
+                            (*m_err_cb)( string("PRIORITY BOOST MSG ID ") + m->first );
+                        }
                         m->second->boosted = true;
                         // Remove entry from current queue
                         m_queue_list[m->second->priority].erase( q );
                         // Push to front of high priority queue
                         m_queue_list[0].push_front( m->second );
                     } else {
-                        // Log this?
-                        cerr << "Message entry not found in expected queue\n";
+                        if ( m_err_cb ) {
+                            (*m_err_cb)( "Message entry not found in expected queue\n" );
+                        }
                     }
                 }
             }

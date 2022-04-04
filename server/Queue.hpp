@@ -11,7 +11,6 @@
 
 /*
 TODO / Think about
-- test fail msg / recovery
 - support minimum queue wait time option (for polling tasks)
 - Logging? Or registered error handlers?
 - Revisit deque or list / forward_list?
@@ -26,6 +25,7 @@ public:
     };
 
     typedef std::vector<std::string> MsgIdList_t;
+    typedef void (ErrorCB_t)( const std::string & msg );
 
     Queue( uint8_t a_priorities, size_t a_capacity, size_t a_poll_interval = 5000, size_t a_fail_timeout = 30000 );
     ~Queue();
@@ -46,12 +46,13 @@ public:
 
 
     // API for monitoring
+    void            setErrorCallback( ErrorCB_t * a_callback );
     size_t          count();
     size_t          freeCount();
     size_t          workingCount();
     size_t          failedCount();
     MsgIdList_t     getFailed();
-    void            eraseFailed( const MsgIdList_t & a_msg_ids );
+    MsgIdList_t     eraseFailed( const MsgIdList_t & a_msg_ids );
 
 private:
     typedef std::chrono::time_point<std::chrono::system_clock> timestamp_t;
@@ -116,4 +117,5 @@ private:
     std::thread                 m_monitor_thread;
     std::condition_variable     m_mon_cv;
     bool                        m_run;
+    ErrorCB_t                 * m_err_cb;
 };

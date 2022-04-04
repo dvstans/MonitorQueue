@@ -48,7 +48,11 @@ void workerThread( Queue & queue, size_t id ) {
             cout << "worker " << id << " exit, count: " << loc_count << endl;
             queue.ack( msg->id, msg->token, true );
             return;
-        }else {
+        } else if ( msg->id.size() == 2 && msg->id[0] == '5' ) {
+            // Fail these messages
+            this_thread::sleep_for(chrono::milliseconds( 2000 ));
+            fail = true;
+        } else {
             ms = rng() & 0x1F; // 1 - 31 msec delay
             fail = false;
             if ( ms == 0 ) { // when 0, hang to test monitor recovery
@@ -114,9 +118,15 @@ void printStats(){
     }
 }
 
+void logger( const string & a_msg ) {
+    cout << "[QUEUE] " << a_msg << "\n";
+}
+
 int main( int argc, char ** argv ) {
     size_t  i, j;
     Queue   q( 3, 100, 250, 1000 );
+
+    q.setErrorCallback( &logger );
 
     for ( i = 0; i < MSG_COUNT; i++ ) {
         g_stats[std::to_string(i)].worker.resize(WORKER_COUNT);
@@ -164,6 +174,14 @@ int main( int argc, char ** argv ) {
     cout << "Queue msg count: " << q.count() << "\n";
     cout << "Queue working count: " << q.workingCount() << "\n";
     cout << "Queue failed msg count: " << q.failedCount() << "\n";
+
+    Queue::MsgIdList_t failed = q.getFailed();
+    cout << "  failed msg ID count: " << failed.size() << "\n";
+
+    failed = q.eraseFailed( failed );
+    cout << "  erased msg count: " << failed.size() << "\n";
+
+    cout << "  new queue msg count: " << q.count() << "\n";
 
     printStats();
 }
