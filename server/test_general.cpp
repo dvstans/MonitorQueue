@@ -125,6 +125,7 @@ void logger( const string & a_msg ) {
 int main( int argc, char ** argv ) {
     size_t  i, j;
     Queue   q( 3, 100, 250, 1000 );
+    vector<thread*> workers;
 
     q.setErrorCallback( &logger );
 
@@ -133,18 +134,17 @@ int main( int argc, char ** argv ) {
         g_stats[std::to_string(i)].proc_order.reserve(PROC_COUNT);
     }
 
-    for ( j = 0; j < 100; j++ ) {
-        // Make last 5 medium priority to test boost
-        q.push(std::to_string(j),string(), j > 95?1:0);
-    }
-
-    vector<thread*> workers;
-
     cout << "create workers" << endl;
 
     for ( i = 0; i < WORKER_COUNT; i++ ) {
         workers.push_back( new thread( workerThread, std::ref(q), i ));
     }
+
+    for ( j = 0; j < 100; j++ ) {
+        // Make last 5 medium priority to test boost
+        q.push(std::to_string(j),string(), j > 95?1:0);
+    }
+
 
     while ( j < MSG_COUNT ) {
         if (( i = q.freeCount()) > 20 ) {

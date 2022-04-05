@@ -31,12 +31,12 @@ public:
     ~Queue();
 
     // API for publisher
-    void            push( const std::string & a_id, const std::string & a_data, uint8_t a_priority );
+    void            push( const std::string & a_id, const std::string & a_data, uint8_t a_priority, size_t a_delay = 0 );
 
     // API for consumer
     const Msg_t &   pop();
-    void            ack( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_requeue_delay = 0 );
-    const Msg_t &   popAck( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_requeue_delay = 0 );
+    void            ack( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_delay = 0 );
+    const Msg_t &   popAck( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_delay = 0 );
 
     // Prevent implcit conversions of token types on Ack methods
     template <typename T>
@@ -58,7 +58,7 @@ private:
     typedef std::chrono::time_point<std::chrono::system_clock> timestamp_t;
 
     enum MsgState_t {
-        MSG_QUEUED,
+        MSG_QUEUED = 0,
         MSG_RUNNING,
         MSG_DELAYED,
         MSG_FAILED
@@ -90,7 +90,6 @@ private:
         uint8_t                 fail_count; ///< Fail count
         MsgState_t              state;      ///< Queued, running, failed (for monitoring)
         timestamp_t             state_ts;   ///< Time when message changed state (for monitoring)
-        timestamp_t             delay_ts;   ///< Delay time when message should (re)queued
         Msg_t                   message;    ///< Message (shared ptr)
     };
 
@@ -98,21 +97,23 @@ private:
     {
         bool operator() ( const MsgEntry_t * left, const MsgEntry_t * right) const
         {
-            return left->delay_ts < right->delay_ts;
+            return left->state_ts < right->state_ts;
         }
     };
 
     typedef std::vector<std::deque<MsgEntry_t*>> queue_list_t;
     typedef std::map<std::string,MsgEntry_t*> msg_map_t;
-    typedef std::set<MsgEntry_t*,DelaySetCompare> msg_delay_t;
+    typedef std::multiset<MsgEntry_t*,DelaySetCompare> msg_delay_t;
     typedef std::vector<MsgEntry_t*> msg_pool_t;
 
     MsgEntry_t * getMsgEntry( const std::string & a_id, const std::string & a_data, uint8_t a_priority );
     const Msg_t & popImpl( std::unique_lock<std::mutex> & a_lock );
-    void ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_requeue_delay );
+    void ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_delay );
     void insertDelayedMsg( MsgEntry_t * a_msg, const timestamp_t & a_requeue_ts  );
     void monitorThread();
     void delayThread();
+
+    size_t qcount(); // DEBUG
 
     std::mutex                  m_mutex;
     std::condition_variable     m_cv;
