@@ -7,6 +7,7 @@
 #include "Queue.hpp"
 
 using namespace std;
+using namespace MonQueue;
 
 map<string,chrono::time_point<chrono::system_clock>> deque_ts;
 mutex g_map_mutex;
@@ -49,10 +50,10 @@ void logger( const string & a_msg ) {
 
 int main( int argc, char ** argv ) {
     size_t  i;
-    Queue   q( 3, 100, 250, 1000 );
+    Queue   q( 3, 100, 1000, 0, 30000, 250, &logger );
     vector<thread*> workers;
 
-    q.setErrorCallback( &logger );
+    //q.setErrorCallback( &logger );
 
     cout << "create workers" << endl;
 

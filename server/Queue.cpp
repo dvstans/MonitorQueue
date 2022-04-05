@@ -1,27 +1,42 @@
-#include <iostream>
 #include <stdexcept>
 #include <algorithm>
 #include "Queue.hpp"
 
 using namespace std;
 
+namespace MonQueue {
+
 //================================= PUBLIC METHODS ============================
 
-Queue::Queue( uint8_t a_priorities, size_t a_capacity, size_t a_poll_interval, size_t a_fail_timeout ) :
-    m_capacity(a_capacity),
-    m_count_queued(0),
-    m_count_failed(0),
-    m_rng(chrono::steady_clock::now().time_since_epoch().count()),
-    m_poll_interval( a_poll_interval ),
-    m_fail_timeout( a_fail_timeout ),
-    m_max_retries( 10 ), // TODO make config
-    m_boost_timeout( 1000 ), // TODO make config
-    m_monitor_thread( &Queue::monitorThread, this ),
-    m_delay_thread( &Queue::delayThread, this ),
+/** @brief Queue constructor
+ *
+ * Construct a queue based on specified configuration parameters. Multiple
+ * queue instances can coexist within the same process (each will have it's own
+ * monitoring thread).
+ */
+Queue::Queue(
+    uint8_t a_priority_count,           ///< Number of priorities (0 to count-1, 0 = highest)
+    size_t a_msg_capacity,              ///< Maximum number of active and failed messages
+    size_t a_msg_ack_timeout_msec,      ///< Max allowed consumer processing time (0 = no limit)
+    size_t a_msg_max_retries,           ///< Max message retires before message is failed (requires ack timeout set)
+    size_t a_msg_boost_timeout_msec,    ///< Timeout to boost priority of queued messages
+    size_t a_monitor_period_msec,       ///< Monitor thread polling period
+    ErrorCB_t a_err_cb                  ///< Error callback function
+    ) :
+    m_capacity( a_msg_capacity ),
+    m_fail_timeout( a_msg_ack_timeout_msec ),
+    m_max_retries( a_msg_max_retries ),
+    m_boost_timeout( a_msg_boost_timeout_msec ),
+    m_poll_interval( a_monitor_period_msec ),
+    m_err_cb( a_err_cb ),
+    m_count_queued( 0 ),
+    m_count_failed( 0 ),
     m_run( true ),
-    m_err_cb( 0 )
+    m_rng( chrono::steady_clock::now().time_since_epoch().count() ),
+    m_monitor_thread( &Queue::monitorThread, this ),
+    m_delay_thread( &Queue::delayThread, this )
 {
-    m_queue_list.resize( a_priorities );
+    m_queue_list.resize( a_priority_count );
 }
 
 Queue::~Queue() {
@@ -31,7 +46,9 @@ Queue::~Queue() {
     m_monitor_thread.join();
     m_delay_thread.join();
 
-    // TODO - Need to free memory
+    for ( msg_pool_t::iterator m = m_msg_pool.begin(); m != m_msg_pool.end(); m++ ) {
+        delete *m;
+    }
 }
 
 void
@@ -62,7 +79,7 @@ Queue::push( const std::string & a_id, const std::string & a_data, uint8_t a_pri
     } else {
         m_queue_list[a_priority].push_front( msg );
         m_count_queued++;
-        m_cv.notify_one();
+        m_pop_cv.notify_one();
     }
 }
 
@@ -186,7 +203,7 @@ Queue::popImpl( unique_lock<mutex> & a_lock ) {
             (*m_err_cb)( "Pop - no msgs avail, wait w/o timeout" );
         }*/
 
-        m_cv.wait( a_lock );
+        m_pop_cv.wait( a_lock );
     }
 
     MsgEntry_t * entry = 0;
@@ -242,7 +259,7 @@ Queue::ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size
             e->second->state_ts = now;
             m_queue_list[e->second->priority].push_front( e->second );
             m_count_queued++;
-            m_cv.notify_one();
+            m_pop_cv.notify_one();
         }
 
     } else {
@@ -261,25 +278,11 @@ Queue::insertDelayedMsg( MsgEntry_t * a_msg, const timestamp_t & a_requeue_ts ) 
 
     m_msg_delay.insert( a_msg );
 
-    cout << "delay order\n";
-    for ( msg_delay_t::iterator i = m_msg_delay.begin(); i != m_msg_delay.end(); i++ ){
-        cout << (*i)->message.id << "\n";
-    }
-
     if ( *m_msg_delay.begin() == a_msg ) {
         m_delay_cv.notify_one();
     }
 }
 
-size_t Queue::qcount(){
-    size_t cnt = 0;
-
-    for ( queue_list_t::iterator q = m_queue_list.begin(); q != m_queue_list.end(); ++q ){
-        cnt += q->size();
-    }
-
-    return cnt;
-}
 
 void
 Queue::monitorThread() {
@@ -288,7 +291,6 @@ Queue::monitorThread() {
     msg_map_t::iterator m;
     deque<MsgEntry_t*>::iterator q;
     size_t notify;
-    // int x = 0; // Debug
 
     unique_lock<mutex> lock( m_mutex );
 
@@ -297,21 +299,6 @@ Queue::monitorThread() {
 
         if ( !m_run ){
             return;
-        }
-
-        /* Debug
-        if ( ++x == 20 ) {
-            x = 0;
-            cout << "--------- MSG STATE ---------\n";
-            for ( m = m_msg_map.begin(); m != m_msg_map.end(); m++ ) {
-                cout << "  " << m->first << " : " << m->second->state << "\n";
-            }
-            cout << "-----------------------------\n";
-        }
-        */
-
-        if ( m_err_cb ) {
-            (*m_err_cb)( string("free: ") + to_string( freeCount()) + ", count: " + to_string(qcount()) + ", failed: " + to_string(m_count_failed) + ", delayed: " + to_string( m_msg_delay.size() ));
         }
 
         now = std::chrono::system_clock::now();
@@ -370,9 +357,9 @@ Queue::monitorThread() {
         }
 
         if ( notify == 1 ) {
-            m_cv.notify_one();
+            m_pop_cv.notify_one();
         } else if ( notify > 1 ) {
-            m_cv.notify_all();
+            m_pop_cv.notify_all();
         }
     }
 }
@@ -425,7 +412,7 @@ Queue::delayThread() {
                     (*m)->state_ts = now;
                     m_queue_list[(*m)->priority].push_back( *m );
                     m_count_queued++;
-                    m_cv.notify_one();
+                    m_pop_cv.notify_one();
 
                     // Remove from delay set
                     m_msg_delay.erase( m );
@@ -436,3 +423,5 @@ Queue::delayThread() {
         }
     }
 }
+
+} // MonQueue namespace

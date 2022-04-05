@@ -12,6 +12,7 @@
 #define MSG_COUNT       250
 
 using namespace std;
+using namespace MonQueue;
 
 std::atomic<int> g_tot_procs{0};
 std::atomic<int> g_tot_timeout{0};
@@ -124,10 +125,11 @@ void logger( const string & a_msg ) {
 
 int main( int argc, char ** argv ) {
     size_t  i, j;
-    Queue   q( 3, 100, 250, 1000 );
+    Queue   q( 3, 100, 1000, 5, 5000, 250, &logger );
+
     vector<thread*> workers;
 
-    q.setErrorCallback( &logger );
+    //q.setErrorCallback( &logger );
 
     for ( i = 0; i < MSG_COUNT; i++ ) {
         g_stats[std::to_string(i)].worker.resize(WORKER_COUNT);

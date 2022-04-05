@@ -10,30 +10,62 @@
 #include <memory>
 #include <random>
 
-/*
-TODO / Think about
-- support minimum queue wait time option (for polling tasks)
-- Need to free memory
+/* TODO
+- Add timeout option to push and pop methods
+- Add non-blocking push and pop methods
+- Template message data type (or none at all)
+- Add all config options (config class?)
+- add option to disable ack timeout (= 0)
 */
 
+namespace MonQueue {
+
+/** @brief Message queue class with progess monitoring
+ *
+ * The Queue class is a priority message queue with built-in consumer progress
+ * monitoring and optional enqueue delay. Messages consist of a producer-
+ * defined unique ID (string) and a data payload (string).
+ *
+ * Monitoring is based on a maximum consumer acknowledgement timeout. If this
+ * limit is exceeded, the consumer is considered failed and the associated
+ * message is re-enqueued for a retry. A retry limit can be specified, and if
+ * exceeded on a given message, the message will be marked as failed and no
+ * further processing will be attempted. Failed messages a retained internally
+ * and consume queue capacity; thus the producer must monitor for, and handle,
+ * failed messages.
+ *
+ * The Queue class is fully thread-safe.
+ */
 class Queue {
 public:
+    /// @brief Message structure for use by client
     struct Msg_t {
-        std::string     id;
-        uint64_t        token;
-        std::string     data;
+        std::string     id;     ///< Unique producer-specified message ID
+        std::string     data;   ///< Optional producer-specified data payload
+        uint64_t        token;  ///< Queue defined message token required for ACK
     };
 
-    typedef std::vector<std::string> MsgIdList_t;
-    typedef void (ErrorCB_t)( const std::string & msg );
+    typedef std::vector<std::string> MsgIdList_t;           ///< Message ID list type
+    typedef void (ErrorCB_t)( const std::string & msg );    ///< Error callback type
 
-    Queue( uint8_t a_priorities, size_t a_capacity, size_t a_poll_interval = 5000, size_t a_fail_timeout = 30000 );
+    Queue(
+        uint8_t a_priority_count,
+        size_t a_msg_capacity,
+        size_t a_msg_ack_timeout_msec = 0,
+        size_t a_msg_max_retries = 10,
+        size_t a_msg_boost_timeout_msec = 60000,
+        size_t a_monitor_period_msec = 5000,
+        ErrorCB_t a_err_cb = 0
+    );
+
     ~Queue();
 
-    // API for publisher
+    //----- Methods for use by publisher(s)
+
     void            push( const std::string & a_id, const std::string & a_data, uint8_t a_priority, size_t a_delay = 0 );
 
-    // API for consumer
+    //----- Methods for use by consumer(s)
+
     const Msg_t &   pop();
     void            ack( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_delay = 0 );
     const Msg_t &   popAck( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_delay = 0 );
@@ -45,7 +77,8 @@ public:
     void            popAck( const std::string & a_id, T a_token, bool a_requeue = false ) = delete;
 
 
-    // API for monitoring
+    //----- Methods for use by monitoring process
+
     void            setErrorCallback( ErrorCB_t * a_callback );
     size_t          count();
     size_t          freeCount();
@@ -55,25 +88,30 @@ public:
     MsgIdList_t     eraseFailed( const MsgIdList_t & a_msg_ids );
 
 private:
+    /// General timestamp type
     typedef std::chrono::time_point<std::chrono::system_clock> timestamp_t;
 
+    /// Internal message state
     enum MsgState_t {
-        MSG_QUEUED = 0,
-        MSG_RUNNING,
-        MSG_DELAYED,
-        MSG_FAILED
+        MSG_QUEUED = 0,     ///< Message is in a queue and ready for consumption
+        MSG_RUNNING,        ///< Message has been de-queued by consumer
+        MSG_DELAYED,        ///< Message is in the delay queue
+        MSG_FAILED          ///< Message is failed
     };
 
+    /// Internal message entry record
     struct MsgEntry_t {
+        /// Constructor
         MsgEntry_t( const std::string & a_id, const std::string & a_data, uint8_t a_priority ) :
             priority( a_priority ),
             boosted( false ),
             fail_count( 0 ),
             state( MSG_QUEUED ),
             state_ts( std::chrono::system_clock::now() ),
-            message(Msg_t{ a_id, 0, a_data })
+            message(Msg_t{ a_id, a_data, 0 })
         {};
 
+        /// Reset message for re-use
         void reset( const std::string & a_id, const std::string & a_data, uint8_t a_priority ) {
             priority = a_priority;
             boosted = false;
@@ -81,8 +119,8 @@ private:
             state = MSG_QUEUED;
             state_ts = std::chrono::system_clock::now();
             message.id = a_id;
-            message.token = 0;
             message.data = a_data;
+            message.token = 0;
         }
 
         uint8_t                 priority;   ///< Message priority
@@ -90,10 +128,11 @@ private:
         uint8_t                 fail_count; ///< Fail count
         MsgState_t              state;      ///< Queued, running, failed (for monitoring)
         timestamp_t             state_ts;   ///< Time when message changed state (for monitoring)
-        Msg_t                   message;    ///< Message (shared ptr)
+        Msg_t                   message;    ///< Message data
     };
 
-    struct DelaySetCompare final
+    /// Custom multiset comparator to sort message entries by time
+    struct DelaySetCompare
     {
         bool operator() ( const MsgEntry_t * left, const MsgEntry_t * right) const
         {
@@ -101,38 +140,43 @@ private:
         }
     };
 
-    typedef std::vector<std::deque<MsgEntry_t*>> queue_list_t;
-    typedef std::map<std::string,MsgEntry_t*> msg_map_t;
-    typedef std::multiset<MsgEntry_t*,DelaySetCompare> msg_delay_t;
-    typedef std::vector<MsgEntry_t*> msg_pool_t;
+    // Typedefs used by implementation
 
-    MsgEntry_t * getMsgEntry( const std::string & a_id, const std::string & a_data, uint8_t a_priority );
-    const Msg_t & popImpl( std::unique_lock<std::mutex> & a_lock );
-    void ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_delay );
-    void insertDelayedMsg( MsgEntry_t * a_msg, const timestamp_t & a_requeue_ts  );
-    void monitorThread();
-    void delayThread();
+    typedef std::vector<std::deque<MsgEntry_t*>>        queue_list_t;
+    typedef std::map<std::string,MsgEntry_t*>           msg_map_t;
+    typedef std::multiset<MsgEntry_t*,DelaySetCompare>  msg_delay_t;
+    typedef std::vector<MsgEntry_t*>                    msg_pool_t;
 
-    size_t qcount(); // DEBUG
+    // Private methods (see source for documentation)
 
-    std::mutex                  m_mutex;
-    std::condition_variable     m_cv;
-    size_t                      m_capacity;
-    size_t                      m_count_queued;
-    size_t                      m_count_failed;
-    msg_pool_t                  m_msg_pool;
-    msg_map_t                   m_msg_map;
-    msg_delay_t                 m_msg_delay;
-    queue_list_t                m_queue_list;
-    std::mt19937_64             m_rng;
-    size_t                      m_poll_interval;    ///< Internal monitoring poll interval in msec
+    MsgEntry_t *    getMsgEntry( const std::string & a_id, const std::string & a_data, uint8_t a_priority );
+    const Msg_t &   popImpl( std::unique_lock<std::mutex> & a_lock );
+    void            ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_delay );
+    void            insertDelayedMsg( MsgEntry_t * a_msg, const timestamp_t & a_requeue_ts  );
+    void            monitorThread();
+    void            delayThread();
+
+    size_t                      m_capacity;         ///< Max message capacity (including failed)
     size_t                      m_fail_timeout;     ///< Message ACK fail timeout in msec (max runtime)
-    size_t                      m_max_retries;
+    size_t                      m_max_retries;      ///< Maximum per-message dequeue retries
     size_t                      m_boost_timeout;    ///< Message priority boost timeout in msec
-    std::thread                 m_monitor_thread;
-    std::condition_variable     m_mon_cv;
-    std::thread                 m_delay_thread;
-    std::condition_variable     m_delay_cv;
-    bool                        m_run;
-    ErrorCB_t                 * m_err_cb;
+    size_t                      m_poll_interval;    ///< Internal monitoring poll interval in msec
+    ErrorCB_t                 * m_err_cb;           ///< Error callback function ptr
+    size_t                      m_count_queued;     ///< Number of messages in queues
+    size_t                      m_count_failed;     ///< Number of messages in failed state
+    bool                        m_run;              ///< Run/stop flag for internal threads
+    std::mt19937_64             m_rng;              ///< Random number generator for ACK tokens
+    std::thread                 m_monitor_thread;   ///< Monitoring thread
+    std::condition_variable     m_mon_cv;           ///< Monitoring cond var
+    std::thread                 m_delay_thread;     ///< Delay thread
+    std::condition_variable     m_delay_cv;         ///< Delay cond var
+    std::mutex                  m_mutex;            ///< Mutex for all shared message structures
+    std::condition_variable     m_pop_cv;           ///< Cond var for pop methods
+    msg_pool_t                  m_msg_pool;         ///< Message entry memory pool
+    msg_map_t                   m_msg_map;          ///< Message ID to entry index
+    msg_delay_t                 m_msg_delay;        ///< Message delay queue
+    queue_list_t                m_queue_list;       ///< Queue list (one queue per priority)
 };
+
+} // MonQueue namespace
+
