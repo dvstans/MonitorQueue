@@ -310,7 +310,7 @@ Queue::monitorThread() {
         // and starving low-priority messages
 
         for ( m = m_msg_map.begin(); m != m_msg_map.end(); m++ ) {
-            if ( m->second->state == MSG_RUNNING ) {
+            if ( m->second->state == MSG_RUNNING && m_fail_timeout ) {
                 if ( m->second->state_ts < fail_time ) {
                     if ( ++m->second->fail_count == m_max_retries ) {
                         // Fail message

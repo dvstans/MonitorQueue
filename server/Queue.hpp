@@ -14,8 +14,6 @@
 - Add timeout option to push and pop methods
 - Add non-blocking push and pop methods
 - Template message data type (or none at all)
-- Add all config options (config class?)
-- add option to disable ack timeout (= 0)
 */
 
 namespace MonQueue {
@@ -51,7 +49,7 @@ public:
     Queue(
         uint8_t a_priority_count,
         size_t a_msg_capacity,
-        size_t a_msg_ack_timeout_msec = 0,
+        size_t a_msg_ack_timeout_msec,
         size_t a_msg_max_retries = 10,
         size_t a_msg_boost_timeout_msec = 60000,
         size_t a_monitor_period_msec = 5000,
