@@ -1,11 +1,20 @@
+#include <Poco/Net/HTTPServer.h>
+#include <Poco/Net/HTTPServerParams.h>
 #include "Queue.hpp"
+
+namespace MonQueue {
 
 class QueueServer {
 public:
     QueueServer();
     ~QueueServer();
 
-    void listen();
+    void start();
+    void stop();
 private:
-    Queue   m_queue;
+    Poco::Net::HTTPServerParams::Ptr    m_server_params;
+    Poco::Net::HTTPServer *             m_server;
+    Queue                               m_queue;
 };
+
+}

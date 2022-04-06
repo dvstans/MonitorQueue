@@ -1,9 +1,10 @@
-#cc_binary(
-#    name = "monitorqueue",
-#    srcs = glob(["*.cpp","*.hpp"]),
-#    linkopts = ["-lpthread"],
-#    visibility = ["//visibility:public"]
-#)
+cc_binary(
+    name = "mqserver",
+    srcs = glob(["Queue.hpp","Queue.cpp","QueueServer.hpp","QueueServer.cpp","mqserver.cpp"]),
+    includes = ["."],
+    linkopts = ["-lpthread","-lPocoFoundation","-lPocoNet"],
+    visibility = ["//visibility:public"]
+)
 
 cc_test(
     name = "test_general",
@@ -12,6 +13,7 @@ cc_test(
     srcs = ["Queue.hpp","Queue.cpp","test_general.cpp"],
     linkopts = ["-lpthread"]
 )
+
 cc_test(
     name = "test_delay",
     size = "small",

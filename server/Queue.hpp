@@ -13,7 +13,7 @@
 /* TODO
 - Add timeout option to push and pop methods
 - Add non-blocking push and pop methods
-- Template message data type (or none at all)
+- Template message data type or polymorphic msg class (or none at all)
 */
 
 namespace MonQueue {
