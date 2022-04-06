@@ -1,6 +1,7 @@
+#include <iostream>
 #include <stdexcept>
-#include <Poco/Net/HTTPRequestHandler.h>
-#include <Poco/Net/HTTPRequestHandlerFactory.h>
+#include <Poco/Exception.h>
+#include <Poco/Net/HTTPServerResponse.h>
 #include <Poco/Net/HTTPServerParams.h>
 #include "QueueServer.hpp"
 
@@ -11,48 +12,70 @@ using namespace Poco::Net;
 
 namespace MonQueue {
 
-class TestReqHandler : public HTTPRequestHandler {
+class HelloHandler : public HTTPRequestHandler {
 public:
-    TestReqHandler() {}
-    ~TestReqHandler() {}
+    static HTTPRequestHandler * factory() {
+        return new HelloHandler();
+    }
 
     void handleRequest( HTTPServerRequest & request, HTTPServerResponse & response ) {
         (void) request;
 
-        // Do something
+        response.setStatus(HTTPResponse::HTTP_OK);
+        response.setContentType("text/html");
+        ostream& out = response.send();
+        out << "Hello World!\n";
+        out.flush();
     }
 };
 
-class MonQueueReqHandlerFactory : public HTTPRequestHandlerFactory {
+class GoodbyeHandler : public HTTPRequestHandler {
 public:
-    MonQueueReqHandlerFactory() {}
-    ~MonQueueReqHandlerFactory() {}
+    static HTTPRequestHandler * factory() {
+        return new GoodbyeHandler();
+    }
 
-    HTTPRequestHandler * createRequestHandler( const HTTPServerRequest & request ) {
-        return new TestReqHandler();
+    void handleRequest( HTTPServerRequest & request, HTTPServerResponse & response ) {
+        (void) request;
+
+        response.setStatus(HTTPResponse::HTTP_OK);
+        response.setContentType("text/html");
+        ostream& out = response.send();
+        out << "Goodbye World!\n";
+        out.flush();
     }
 };
 
-QueueServer::QueueServer() : m_server(0), m_queue( 3, 100, 30000 ) {
-    m_server_params = HTTPServerParams::Ptr( new HTTPServerParams() );
-    m_server_params->setServerName( "mqserver" );
+// Static route map
+QueueServer::RouteMap_t   QueueServer::m_route_map;
+
+QueueServer::QueueServer() : m_queue( 3, 100, 30000 ) {
+    try {
+        if ( !m_route_map.size() ) {
+            m_route_map["/hello/world"] = &HelloHandler::factory;
+            m_route_map["/goodbye/world"] = &GoodbyeHandler::factory;
+        }
+
+        m_server_params = new HTTPServerParams();
+        m_server_params->setServerName( "mqserver" );
+        m_server = new HTTPServer( new RequestHandlerFactory(), ServerSocket(8080), m_server_params );
+    } catch ( Poco::Exception & e ) {
+        cout << "exception: " << e.displayText() << endl;
+        throw;
+    }
 }
 
 QueueServer::~QueueServer() {
-    if ( m_server ) {
-        delete m_server;
-    }
+    delete m_server;
 }
 
 void
 QueueServer::start(){
-    if ( m_server ) {
-        throw runtime_error("Server already running");
+    try {
+        m_server->start();
+    } catch ( Poco::Exception & e ) {
+        cout << "exception: " << e.displayText() << endl;
     }
-
-    auto factory = HTTPRequestHandlerFactory::Ptr( new MonQueueReqHandlerFactory() );
-
-    m_server = new HTTPServer( factory, 8080, m_server_params );
 }
 
 void
