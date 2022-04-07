@@ -66,11 +66,11 @@ int main( int argc, char ** argv ) {
 
     chrono::time_point<chrono::system_clock> start = std::chrono::system_clock::now();
 
-    q.push( "4000", string(), 0, 4000 );
-    q.push( "3000", string(), 0, 3000 );
-    q.push( "5000", string(), 0, 5000 );
-    q.push( "1000", string(), 0, 1000 );
-    q.push( "2000", string(), 0, 2000 );
+    q.push( "4000", 0, 4000 );
+    q.push( "3000", 0, 3000 );
+    q.push( "5000", 0, 5000 );
+    q.push( "1000", 0, 1000 );
+    q.push( "2000", 0, 2000 );
 
     // Wait for msgs to be processed
     while ( q.count()) {
@@ -99,7 +99,7 @@ int main( int argc, char ** argv ) {
         abort();
     }
 
-    q.push( "exit", string(), 0 );
+    q.push( "exit", /*string(),*/ 0 );
 
     cout << "Waiting for workers\n";
 

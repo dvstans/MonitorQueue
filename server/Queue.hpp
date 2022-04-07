@@ -11,6 +11,7 @@
 #include <random>
 
 /* TODO
+- Add mult-message push
 - Add timeout option to push and pop methods
 - Add non-blocking push and pop methods
 - Template message data type or polymorphic msg class (or none at all)
@@ -36,10 +37,10 @@ namespace MonQueue {
  */
 class Queue {
 public:
-    /// @brief Message structure for use by client
+    /// @brief Message structure for use by consumers
     struct Msg_t {
         std::string     id;     ///< Unique producer-specified message ID
-        std::string     data;   ///< Optional producer-specified data payload
+        //std::string     data;   ///< Optional producer-specified data payload
         uint64_t        token;  ///< Queue defined message token required for ACK
     };
 
@@ -60,7 +61,7 @@ public:
 
     //----- Methods for use by publisher(s)
 
-    void            push( const std::string & a_id, const std::string & a_data, uint8_t a_priority, size_t a_delay = 0 );
+    void            push( const std::string & a_id /*, const std::string & a_data*/, uint8_t a_priority, size_t a_delay = 0 );
 
     //----- Methods for use by consumer(s)
 
@@ -100,24 +101,24 @@ private:
     /// Internal message entry record
     struct MsgEntry_t {
         /// Constructor
-        MsgEntry_t( const std::string & a_id, const std::string & a_data, uint8_t a_priority ) :
+        MsgEntry_t( const std::string & a_id, /*const std::string & a_data,*/ uint8_t a_priority ) :
             priority( a_priority ),
             boosted( false ),
             fail_count( 0 ),
             state( MSG_QUEUED ),
             state_ts( std::chrono::system_clock::now() ),
-            message(Msg_t{ a_id, a_data, 0 })
+            message(Msg_t{ a_id, /*a_data,*/ 0 })
         {};
 
         /// Reset message for re-use
-        void reset( const std::string & a_id, const std::string & a_data, uint8_t a_priority ) {
+        void reset( const std::string & a_id, /*const std::string & a_data,*/ uint8_t a_priority ) {
             priority = a_priority;
             boosted = false;
             fail_count = 0;
             state = MSG_QUEUED;
             state_ts = std::chrono::system_clock::now();
             message.id = a_id;
-            message.data = a_data;
+            /*message.data = a_data;*/
             message.token = 0;
         }
 
@@ -147,7 +148,7 @@ private:
 
     // Private methods (see source for documentation)
 
-    MsgEntry_t *    getMsgEntry( const std::string & a_id, const std::string & a_data, uint8_t a_priority );
+    MsgEntry_t *    getMsgEntry( const std::string & a_id, /*const std::string & a_data,*/ uint8_t a_priority );
     const Msg_t &   popImpl( std::unique_lock<std::mutex> & a_lock );
     void            ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_delay );
     void            insertDelayedMsg( MsgEntry_t * a_msg, const timestamp_t & a_requeue_ts  );

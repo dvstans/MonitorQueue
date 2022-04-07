@@ -144,7 +144,7 @@ int main( int argc, char ** argv ) {
 
     for ( j = 0; j < 100; j++ ) {
         // Make last 5 medium priority to test boost
-        q.push(std::to_string(j),string(), j > 95?1:0);
+        q.push(std::to_string(j), /*string(),*/ j > 95?1:0);
     }
 
 
@@ -152,7 +152,7 @@ int main( int argc, char ** argv ) {
         if (( i = q.freeCount()) > 20 ) {
             cout << "push " << i << ", " << j << endl;
             for ( i = j + i; j < i && j < MSG_COUNT; j++ ) {
-                q.push(std::to_string(j),string(),0);
+                q.push(std::to_string(j), /*string(),*/ 0);
             }
         }
 
@@ -163,7 +163,7 @@ int main( int argc, char ** argv ) {
         this_thread::sleep_for(chrono::milliseconds( 500 ));
     }
 
-    q.push("exit",string(),0);
+    q.push("exit", /*string(),*/ 0);
 
     cout << "wait for workers" << endl;
 

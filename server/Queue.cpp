@@ -52,7 +52,7 @@ Queue::~Queue() {
 }
 
 void
-Queue::push( const std::string & a_id, const std::string & a_data, uint8_t a_priority, size_t a_delay ) {
+Queue::push( const std::string & a_id, /*const std::string & a_data,*/ uint8_t a_priority, size_t a_delay ) {
     // Verify priority
     if ( a_priority >= m_queue_list.size() ) {
         throw runtime_error( "Invalid queue priority" );
@@ -70,7 +70,7 @@ Queue::push( const std::string & a_id, const std::string & a_data, uint8_t a_pri
         throw length_error( "Queue capacity exceeded" );
     }
 
-    MsgEntry_t * msg = getMsgEntry( a_id, a_data, a_priority );
+    MsgEntry_t * msg = getMsgEntry( a_id, /*a_data,*/ a_priority );
 
     m_msg_map[a_id] = msg;
 
@@ -82,6 +82,7 @@ Queue::push( const std::string & a_id, const std::string & a_data, uint8_t a_pri
         m_pop_cv.notify_one();
     }
 }
+
 
 const Queue::Msg_t &
 Queue::pop() {
@@ -179,14 +180,14 @@ Queue::setErrorCallback( ErrorCB_t * a_callback ) {
 //================================= PRIVATE METHODS ===========================
 
 Queue::MsgEntry_t *
-Queue::getMsgEntry( const string & a_id, const string & a_data, uint8_t a_priority ) {
+Queue::getMsgEntry( const string & a_id, /*const string & a_data,*/ uint8_t a_priority ) {
     MsgEntry_t * msg;
 
     if ( !m_msg_pool.size() ) {
-        msg = new MsgEntry_t( a_id, a_data, a_priority );
+        msg = new MsgEntry_t( a_id, /*a_data,*/ a_priority );
     } else {
         msg = m_msg_pool.back();
-        msg->reset( a_id, a_data, a_priority );
+        msg->reset( a_id, /*a_data,*/ a_priority );
         m_msg_pool.pop_back();
     }
 
