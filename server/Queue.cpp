@@ -1,3 +1,4 @@
+#include <iostream>
 #include <stdexcept>
 #include <algorithm>
 #include "Queue.hpp"
@@ -223,7 +224,7 @@ Queue::popImpl( unique_lock<mutex> & a_lock ) {
 
     entry->state = MSG_RUNNING;
     entry->state_ts = std::chrono::system_clock::now();
-    entry->message.token = m_rng();
+    entry->message.token = m_rng() & 0x001FFFFFFFFFFFFF; // Clamp to 53 bits for JSON compatibility
     m_count_queued--;
 
     return entry->message;
@@ -240,6 +241,7 @@ Queue::ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size
     }
 
     if ( e->second->message.token != a_token ) {
+        //cout << "msg tok: " << e->second->message.token << ", rcvd: " << a_token << endl;
         throw runtime_error( "Invalid message token" );
     }
 

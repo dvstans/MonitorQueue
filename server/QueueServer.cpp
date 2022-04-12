@@ -23,6 +23,28 @@ class Handler : public HTTPRequestHandler {
 
     Handler( Queue & a_queue ) : m_queue( a_queue ) {
         cout << "Handler ctor " << this << endl;
+
+        string msg_json;
+        libjson::Value req_json;
+
+        /* unit test - move to test code
+        for ( int i = 0; i < 100000; i++ ){
+            m_queue.push( to_string( i ), 0, 0 );
+            const Queue::Msg_t & msg = m_queue.pop();
+
+            msg_json = string("{\"type\":\"msg\",\"id\":\"") + msg.id + "\",\"tok\":" + to_string( msg.token ) + "}";
+
+            try {
+                req_json.fromString( msg_json );
+                libjson::Value::Object & ack = req_json.asObject();
+
+                //cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
+                m_queue.ack( ack.getString("id"), (uint64_t)ack.getNumber("tok"), false, 0 );
+
+            } catch ( exception & e ) {
+                cout << "exception: " << e.what() << endl;
+            }
+        }*/
     }
 
     ~Handler() {
@@ -39,6 +61,7 @@ class Handler : public HTTPRequestHandler {
     }
 
   private:
+
     /** @brief Push one or more messages into queue
      *
      * Request is POST, body is JSON array:
@@ -69,8 +92,7 @@ class Handler : public HTTPRequestHandler {
                     m_queue.push( msg.getString("id"), (uint8_t)msg.getNumber("pri"), (size_t)(msg.has("del")?m->asNumber():0) );
                 }
 
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-                out << "{\"type\":\"ack\"}";
+                prepResponse( a_response, HTTPResponse::HTTP_OK );
             } catch( exception & e ) {
                 ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
                 out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
@@ -80,6 +102,14 @@ class Handler : public HTTPRequestHandler {
         }
     }
 
+    /** @brief Push one or more messages into queue
+     *
+     * Request is POST, there are no params
+     *
+     * Response is a JSON message doc or JSON error document:
+     *
+     *   { type: msg, id: <string>, tok: <uint> }
+     */
     void PopRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
         cout << "PopRequest" << endl;
 
@@ -87,21 +117,75 @@ class Handler : public HTTPRequestHandler {
             const Queue::Msg_t & msg = m_queue.pop();
 
             ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-            out << "{\"type\":\"msg\",\"id\":\"" << msg.id << "\",\"token\":"<< msg.token <<"}";
+            out << "{\"type\":\"msg\",\"id\":\"" << msg.id << "\",\"tok\":"<< msg.token <<"}";
+        } else {
+            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
+    /** @brief Push one or more messages into queue
+     *
+     * Request is POST, body is JSON array:
+     *
+     *   { id: <string>, tok: <uint>, que: <bool> (optional), del: <uint> (optional) }]
+     *
+     * Response is empty (success), or JSON error document
+     */
     void AckRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
         if ( a_request.getMethod() == "POST" ) {
-            ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-            out << "{\"status\":\"ack\"}";
+            string body( istreambuf_iterator<char>( a_request.stream() ), {});
+            libjson::Value req_json;
+
+            try {
+                req_json.fromString( body );
+                libjson::Value::Object & ack = req_json.asObject();
+
+                cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
+                m_queue.ack(
+                    ack.getString("id"),
+                    (uint64_t)ack.getNumber("tok"),
+                    ack.has("que")?ack.asBool():false,
+                    (size_t)(ack.has("del")?ack.asNumber():0)
+                );
+
+                prepResponse( a_response, HTTPResponse::HTTP_OK );
+            } catch( exception & e ) {
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+            }
+        } else {
+            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
     void PopAckRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
         if ( a_request.getMethod() == "POST" ) {
-            ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-            out << "{\"status\":\"pop_ack\"}";
+            string body( istreambuf_iterator<char>( a_request.stream() ), {});
+            libjson::Value req_json;
+
+            try {
+                req_json.fromString( body );
+                libjson::Value::Object & ack = req_json.asObject();
+
+                cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
+
+                m_queue.ack(
+                    ack.getString("id"),
+                    (uint64_t)ack.getNumber("tok"),
+                    ack.has("que")?ack.asBool():false,
+                    (size_t)(ack.has("del")?ack.asNumber():0)
+                );
+
+                const Queue::Msg_t & msg = m_queue.pop();
+
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
+                out << "{\"type\":\"msg\",\"id\":\"" << msg.id << "\",\"tok\":"<< msg.token <<"}";
+            } catch( exception & e ) {
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+            }
+        } else {
+            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
@@ -179,5 +263,6 @@ QueueServer::start(){
 void
 QueueServer::stop(){
 }
+
 
 } // namespace MonQueue
