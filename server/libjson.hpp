@@ -255,6 +255,14 @@ namespace libjson {
                 return m_iter->second;
             }
 
+            ValueType type() const {
+                if ( m_iter == m_map.end() ) {
+                    throw std::runtime_error( "Key not set" );
+                }
+
+                return m_iter->second.m_type;
+            }
+
             std::string & asString() {
                 if ( m_iter == m_map.end() ) {
                     throw std::runtime_error( "Key not set" );

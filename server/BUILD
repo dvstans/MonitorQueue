@@ -6,6 +6,14 @@ cc_binary(
     visibility = ["//visibility:public"]
 )
 
+cc_binary(
+    name = "mqclient",
+    srcs = glob(["libjson.hpp","mqclient.cpp"]),
+    includes = ["."],
+    linkopts = ["-lpthread","-lPocoFoundation","-lPocoNet"],
+    visibility = ["//visibility:public"]
+)
+
 cc_test(
     name = "test_general",
     size = "small",
@@ -21,3 +29,4 @@ cc_test(
     srcs = ["Queue.hpp","Queue.cpp","test_delay.cpp"],
     linkopts = ["-lpthread"]
 )
+

@@ -106,8 +106,9 @@ class Handler : public HTTPRequestHandler {
 
                 prepResponse( a_response, HTTPResponse::HTTP_OK );
             } catch( exception & e ) {
+                cerr << e.what() << endl;
                 ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
             }
         } else {
             prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
@@ -163,7 +164,7 @@ class Handler : public HTTPRequestHandler {
                 prepResponse( a_response, HTTPResponse::HTTP_OK );
             } catch( exception & e ) {
                 ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
             }
         } else {
             prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
@@ -194,7 +195,7 @@ class Handler : public HTTPRequestHandler {
                 out << "{\"type\":\"msg\",\"id\":\"" << msg.id << "\",\"tok\":"<< msg.token <<"}";
             } catch( exception & e ) {
                 ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
             }
         } else {
             prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
@@ -217,7 +218,7 @@ class Handler : public HTTPRequestHandler {
 
             } catch( exception & e ) {
                 ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
             }
         } else {
             prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
@@ -241,7 +242,7 @@ class Handler : public HTTPRequestHandler {
 
             } catch( exception & e ) {
                 ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
             }
         } else {
             prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
@@ -276,7 +277,7 @@ class Handler : public HTTPRequestHandler {
 
             } catch( exception & e ) {
                 ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
             }
         } else {
             prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
