@@ -124,7 +124,7 @@ void logger( const string & a_msg ) {
 }
 
 int main( int argc, char ** argv ) {
-    size_t  i, j;
+    size_t  i, j, act, failed, free;
     Queue   q( 3, 100, 1000, 5, 5000, 250, &logger );
 
     vector<thread*> workers;
@@ -147,11 +147,12 @@ int main( int argc, char ** argv ) {
         q.push(std::to_string(j), /*string(),*/ j > 95?1:0);
     }
 
-
     while ( j < MSG_COUNT ) {
-        if (( i = q.freeCount()) > 20 ) {
-            cout << "push " << i << ", " << j << endl;
-            for ( i = j + i; j < i && j < MSG_COUNT; j++ ) {
+        q.getCounts( act, failed, free );
+
+        if ( free > 20 ) {
+            cout << "push " << free << ", " << j << endl;
+            for ( free += j; j < free && j < MSG_COUNT; j++ ) {
                 q.push(std::to_string(j), /*string(),*/ 0);
             }
         }
@@ -159,7 +160,11 @@ int main( int argc, char ** argv ) {
         this_thread::sleep_for(chrono::milliseconds( 5 ));
     }
 
-    while ( q.workingCount()) {
+    while ( true ) {
+        q.getCounts( act, failed, free );
+        if ( !act ) {
+            break;
+        }
         this_thread::sleep_for(chrono::milliseconds( 500 ));
     }
 
@@ -171,19 +176,22 @@ int main( int argc, char ** argv ) {
         workers[i]->join();
     }
 
+    q.getCounts( act, failed, free );
+
     cout << "Total msg processed: " << g_tot_procs << "\n";
     cout << "Total timeouts: " << g_tot_timeout << "\n";
-    cout << "Queue msg count: " << q.count() << "\n";
-    cout << "Queue working count: " << q.workingCount() << "\n";
-    cout << "Queue failed msg count: " << q.failedCount() << "\n";
+    cout << "Queue msg count: " << act + failed << "\n";
+    cout << "Queue active count: " << act << "\n";
+    cout << "Queue failed msg count: " << failed << "\n";
 
-    Queue::MsgIdList_t failed = q.getFailed();
-    cout << "  failed msg ID count: " << failed.size() << "\n";
+    Queue::MsgIdList_t failed_ids = q.getFailed();
+    cout << "  failed msg ID count: " << failed_ids.size() << "\n";
 
-    failed = q.eraseFailed( failed );
-    cout << "  erased msg count: " << failed.size() << "\n";
+    failed_ids = q.eraseFailed( failed_ids );
+    cout << "  erased msg count: " << failed_ids.size() << "\n";
 
-    cout << "  new queue msg count: " << q.count() << "\n";
+    q.getCounts( act, failed, free );
+    cout << "  new queue msg count: " << act + failed << "\n";
 
     printStats();
 }

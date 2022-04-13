@@ -18,16 +18,20 @@ using namespace Poco::Net;
 
 namespace MonQueue {
 
+void logger( const std::string & msg ) {
+    cerr << "[MQSERVER] " << msg << endl;
+}
+
 class Handler : public HTTPRequestHandler {
   public:
 
     Handler( Queue & a_queue ) : m_queue( a_queue ) {
-        cout << "Handler ctor " << this << endl;
+        //cout << "Handler ctor " << this << endl;
 
+        /* unit test - move to test code
         string msg_json;
         libjson::Value req_json;
 
-        /* unit test - move to test code
         for ( int i = 0; i < 100000; i++ ){
             m_queue.push( to_string( i ), 0, 0 );
             const Queue::Msg_t & msg = m_queue.pop();
@@ -44,19 +48,22 @@ class Handler : public HTTPRequestHandler {
             } catch ( exception & e ) {
                 cout << "exception: " << e.what() << endl;
             }
-        }*/
+        }
+        */
     }
 
     ~Handler() {
-        cout << "Handler dtor " << this << endl;
+        //cout << "Handler dtor " << this << endl;
     }
 
-    void handleRequest( HTTPServerRequest & request, HTTPServerResponse & response ) {
-        Poco::URI uri( request.getURI() );
+    void handleRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
+        Poco::URI uri( a_request.getURI() );
         RouteMap_t::iterator r = m_route_map.find( uri.getPath() );
 
         if ( r != m_route_map.end() ) {
-            (this->*(r->second))( request, response );
+            (this->*(r->second))( a_request, a_response );
+        } else {
+            prepResponse( a_response, HTTPResponse::HTTP_NOT_FOUND );
         }
     }
 
@@ -74,6 +81,7 @@ class Handler : public HTTPRequestHandler {
         cout << "PushRequest" << endl;
 
         if ( a_request.getMethod() == "POST" ) {
+            size_t  active, failed, free;
             string body( istreambuf_iterator<char>( a_request.stream() ), {});
             libjson::Value req_json;
 
@@ -85,7 +93,11 @@ class Handler : public HTTPRequestHandler {
                     libjson::Value::Object & msg = m->asObject();
 
                     // TODO This is a hack until push has a built-in wait/timeout
-                    while ( !m_queue.freeCount() ) {
+                    while ( true ) {
+                        m_queue.getCounts( active, failed, free );
+                        if ( free ) {
+                            break;
+                        }
                         this_thread::sleep_for(chrono::milliseconds( 100 ));
                     }
 
@@ -189,6 +201,89 @@ class Handler : public HTTPRequestHandler {
         }
     }
 
+    void CountRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
+        if ( a_request.getMethod() == "GET" ) {
+            try {
+                size_t active, failed, free;
+
+                m_queue.getCounts( active, failed, free );
+
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
+                out << "{\"type\":\"count\",\"capacity\":" << m_queue.getCapacity()
+                    << ",\"active\":" << active
+                    << ",\"failed\":" << failed
+                    << ",\"free\":" << free
+                    << "}";
+
+            } catch( exception & e ) {
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+            }
+        } else {
+            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+        }
+    }
+
+    void GetFailedRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
+        if ( a_request.getMethod() == "GET" ) {
+            try {
+                Queue::MsgIdList_t failed = m_queue.getFailed();
+
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
+                out << "{\"type\":\"failed\",\"ids\":[";
+                for ( Queue::MsgIdList_t::iterator i = failed.begin(); i != failed.end(); i++ ) {
+                    if ( i != failed.begin() ){
+                        out << ",";
+                    }
+                    out << "\"" << *i << "\"";
+                }
+                out << "]}";
+
+            } catch( exception & e ) {
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+            }
+        } else {
+            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+        }
+    }
+
+    void EraseFailedRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
+        if ( a_request.getMethod() == "POST" ) {
+            string body( istreambuf_iterator<char>( a_request.stream() ), {});
+            libjson::Value req_json;
+
+            try {
+                req_json.fromString( body );
+                libjson::Value::Array & req_ids = req_json.asArray();
+                Queue::MsgIdList_t ids;
+
+                for ( libjson::Value::ArrayIter i = req_ids.begin(); i != req_ids.end(); i++ ) {
+                    ids.push_back( i->asString() );
+                }
+
+                Queue::MsgIdList_t erased = m_queue.eraseFailed( ids );
+
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
+                out << "{\"type\":\"erased\",\"ids\":[";
+                for ( Queue::MsgIdList_t::iterator i = erased.begin(); i != erased.end(); i++ ) {
+                    if ( i != erased.begin() ){
+                        out << ",";
+                    }
+                    out << "\"" << *i << "\"";
+                }
+                out << "]}";
+
+            } catch( exception & e ) {
+                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
+                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"";
+            }
+        } else {
+            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+        }
+    }
+
+
     ostream & prepResponse( HTTPServerResponse & a_response, HTTPResponse::HTTPStatus a_status ) {
         a_response.setStatus( a_status );
         a_response.setContentType( "json/html" );
@@ -209,6 +304,9 @@ class Handler : public HTTPRequestHandler {
             m_route_map["/pop"] = &Handler::PopRequest;
             m_route_map["/ack"] = &Handler::AckRequest;
             m_route_map["/pop_ack"] = &Handler::PopAckRequest;
+            m_route_map["/count"] = &Handler::CountRequest;
+            m_route_map["/failed"] = &Handler::GetFailedRequest;
+            m_route_map["/failed/erase"] = &Handler::EraseFailedRequest;
         }
     }
 
@@ -233,15 +331,20 @@ class HandlerFactory : public Poco::Net::HTTPRequestHandlerFactory {
 };
 
 
-QueueServer::QueueServer() : m_queue( 3, 100, 30000 ) {
+QueueServer::QueueServer() : m_queue( 3, 100, 5000, 3 ) {
     try {
+        m_queue.setErrorCallback( &logger );
+
         Handler::setupRouteMap();
 
         m_server_params = new HTTPServerParams();
         m_server_params->setServerName( "mqserver" );
         m_server = new HTTPServer( new HandlerFactory( m_queue ), ServerSocket(8080), m_server_params );
-    } catch ( Poco::Exception & e ) {
-        cout << "exception: " << e.displayText() << endl;
+    } catch ( const Poco::Exception & e ) {
+        cout << "ctor exception: " << e.displayText() << endl;
+        throw;
+    } catch ( const exception & e ) {
+        cout << "ctor exception 2: " << e.what() << endl;
         throw;
     }
 }
@@ -254,8 +357,8 @@ void
 QueueServer::start(){
     try {
         m_server->start();
-    } catch ( Poco::Exception & e ) {
-        cout << "exception: " << e.displayText() << endl;
+    } catch ( const Poco::Exception & e ) {
+        cout << "start exception: " << e.displayText() << endl;
         throw;
     }
 }

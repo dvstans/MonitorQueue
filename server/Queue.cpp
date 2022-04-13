@@ -33,11 +33,12 @@ Queue::Queue(
     m_count_queued( 0 ),
     m_count_failed( 0 ),
     m_run( true ),
-    m_rng( chrono::steady_clock::now().time_since_epoch().count() ),
-    m_monitor_thread( &Queue::monitorThread, this ),
-    m_delay_thread( &Queue::delayThread, this )
+    m_rng( chrono::steady_clock::now().time_since_epoch().count() )
 {
     m_queue_list.resize( a_priority_count );
+
+    m_monitor_thread = thread( &Queue::monitorThread, this );
+    m_delay_thread = thread( &Queue::delayThread, this );
 }
 
 Queue::~Queue() {
@@ -110,38 +111,28 @@ Queue::popAck( const std::string & a_id, uint64_t a_token, bool a_requeue, size_
 }
 
 size_t
-Queue::count() {
-    //lock_guard<mutex> lock(m_mutex);
-    // TODO need locks?
-    return m_msg_map.size();
+Queue::getCapacity() const {
+    return m_capacity;
 }
 
-size_t
-Queue::freeCount() {
-    // TODO need to use atomic int?
-    return m_capacity - m_msg_map.size();
+void
+Queue::getCounts( size_t & a_active, size_t & a_failed, size_t & a_free ) const {
+    lock_guard<mutex> lock(m_mutex);
+
+    a_active = m_msg_map.size() - m_count_failed;
+    a_failed = m_count_failed;
+    a_free = m_capacity - m_msg_map.size();
 }
 
-size_t
-Queue::workingCount() {
-    // TODO need to use atomic int?
-    return m_msg_map.size() - m_count_failed;
-}
-
-size_t
-Queue::failedCount() {
-    // TODO need to use atomic int?
-    return m_count_failed;
-}
 
 Queue::MsgIdList_t
-Queue::getFailed() {
+Queue::getFailed() const {
     MsgIdList_t failed;
     failed.reserve( m_count_failed );
 
     lock_guard<mutex> lock(m_mutex);
 
-    for ( msg_map_t::iterator m = m_msg_map.begin(); m != m_msg_map.end(); m++ ) {
+    for ( msg_map_t::const_iterator m = m_msg_map.begin(); m != m_msg_map.end(); m++ ) {
         if ( m->second->state == MSG_FAILED ) {
             failed.push_back( m->first );
         }
@@ -298,71 +289,77 @@ Queue::monitorThread() {
     unique_lock<mutex> lock( m_mutex );
 
     while ( m_run ) {
-        m_mon_cv.wait_for( lock, poll_ms );
+        try {
+            m_mon_cv.wait_for( lock, poll_ms );
 
-        if ( !m_run ){
-            return;
-        }
+            if ( !m_run ){
+                return;
+            }
 
-        now = std::chrono::system_clock::now();
-        fail_time = now - std::chrono::milliseconds(m_fail_timeout);
-        boost_time = now - std::chrono::milliseconds(m_boost_timeout);
-        notify = 0;
+            now = std::chrono::system_clock::now();
+            fail_time = now - std::chrono::milliseconds(m_fail_timeout);
+            boost_time = now - std::chrono::milliseconds(m_boost_timeout);
+            notify = 0;
 
-        // Scan all messages for timeout on running state
-        // and starving low-priority messages
+            // Scan all messages for timeout on running state
+            // and starving low-priority messages
 
-        for ( m = m_msg_map.begin(); m != m_msg_map.end(); m++ ) {
-            if ( m->second->state == MSG_RUNNING && m_fail_timeout ) {
-                if ( m->second->state_ts < fail_time ) {
-                    if ( ++m->second->fail_count == m_max_retries ) {
-                        // Fail message
-                        m->second->state = MSG_FAILED;
-                        m_count_failed++;
+            for ( m = m_msg_map.begin(); m != m_msg_map.end(); m++ ) {
+                if ( m->second->state == MSG_RUNNING && m_fail_timeout ) {
+                    if ( m->second->state_ts < fail_time ) {
+                        if ( ++m->second->fail_count == m_max_retries ) {
+                            // Fail message
+                            m->second->state = MSG_FAILED;
+                            m_count_failed++;
 
-                        /*if ( m_err_cb ) {
-                            (*m_err_cb)( string("FAIL MSG ID ") + m->first );
-                        }*/
-                    } else {
-                        // Retry message
-                        m->second->state = MSG_QUEUED;
-                        m->second->message.token = 0;
-                        m_queue_list[m->second->priority].push_front( m->second );
-                        m_count_queued++;
-                        notify++;
+                            /*if ( m_err_cb ) {
+                                (*m_err_cb)( string("FAIL MSG ID ") + m->first );
+                            }*/
+                        } else {
+                            // Retry message
+                            m->second->state = MSG_QUEUED;
+                            m->second->message.token = 0;
+                            m_queue_list[m->second->priority].push_front( m->second );
+                            m_count_queued++;
+                            notify++;
 
-                        /*if ( m_err_cb ) {
-                            (*m_err_cb)( string("RETRY MSG ID ") + m->first );
-                        }*/
+                            /*if ( m_err_cb ) {
+                                (*m_err_cb)( string("RETRY MSG ID ") + m->first );
+                            }*/
+                        }
                     }
-                }
-            } else if ( m->second->state == MSG_QUEUED ) {
-                if ( m->second->priority > 0 && !m->second->boosted && m->second->state_ts < boost_time ) {
-                    // Find message in current queue
-                    q = std::find( m_queue_list[m->second->priority].begin(), m_queue_list[m->second->priority].end(), m->second );
-                    if ( q != m_queue_list[m->second->priority].end() ) {
-                        /*if ( m_err_cb ) {
-                            (*m_err_cb)( string("PRIORITY BOOST MSG ID ") + m->first );
-                        }*/
+                } else if ( m->second->state == MSG_QUEUED ) {
+                    if ( m->second->priority > 0 && !m->second->boosted && m->second->state_ts < boost_time ) {
+                        // Find message in current queue
+                        q = std::find( m_queue_list[m->second->priority].begin(), m_queue_list[m->second->priority].end(), m->second );
+                        if ( q != m_queue_list[m->second->priority].end() ) {
+                            /*if ( m_err_cb ) {
+                                (*m_err_cb)( string("PRIORITY BOOST MSG ID ") + m->first );
+                            }*/
 
-                        m->second->boosted = true;
-                        // Remove entry from current queue
-                        m_queue_list[m->second->priority].erase( q );
-                        // Push to front of high priority queue
-                        m_queue_list[0].push_front( m->second );
-                    } else {
-                        if ( m_err_cb ) {
-                            (*m_err_cb)( "Message entry not found in expected queue\n" );
+                            m->second->boosted = true;
+                            // Remove entry from current queue
+                            m_queue_list[m->second->priority].erase( q );
+                            // Push to front of high priority queue
+                            m_queue_list[0].push_front( m->second );
+                        } else {
+                            if ( m_err_cb ) {
+                                (*m_err_cb)( "Message entry not found in expected queue\n" );
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if ( notify == 1 ) {
-            m_pop_cv.notify_one();
-        } else if ( notify > 1 ) {
-            m_pop_cv.notify_all();
+            if ( notify == 1 ) {
+                m_pop_cv.notify_one();
+            } else if ( notify > 1 ) {
+                m_pop_cv.notify_all();
+            }
+        } catch ( const exception & e ) {
+            if ( m_err_cb ) {
+                (*m_err_cb)( e.what() );
+            }
         }
     }
 }
@@ -375,53 +372,60 @@ Queue::delayThread() {
     unique_lock<mutex> lock( m_mutex );
 
     while ( m_run ) {
-        // Calc delay time and (maybe) go to sleep
-        if ( m_msg_delay.size() ) {
-            now = std::chrono::system_clock::now();
-            m = m_msg_delay.begin();
-            if ( (*m)->state_ts > now ) {
-                /*if ( m_err_cb ) {
-                    (*m_err_cb)( "Waiting w/ timeout" );
-                }*/
+        try {
 
-                m_delay_cv.wait_for( lock, (*m)->state_ts - now );
-            }
-        } else {
-            /*if ( m_err_cb ) {
-                (*m_err_cb)( "Waiting w/o timeout" );
-            }*/
-
-            m_delay_cv.wait( lock );
-        }
-
-        if ( !m_run ){
-            return;
-        }
-
-        // See if one or messages are ready to queue
-        if ( m_msg_delay.size() ) {
-            now = std::chrono::system_clock::now();
-
-            while ( m_msg_delay.size() ) {
+            // Calc delay time and (maybe) go to sleep
+            if ( m_msg_delay.size() ) {
+                now = std::chrono::system_clock::now();
                 m = m_msg_delay.begin();
-
-                if ( (*m)->state_ts <= now ) {
+                if ( (*m)->state_ts > now ) {
                     /*if ( m_err_cb ) {
-                        (*m_err_cb)( string("Queuing delayed msg ID ") + (*m)->message.id );
+                        (*m_err_cb)( "Waiting w/ timeout" );
                     }*/
 
-                    // Msg is ready, push to queue
-                    (*m)->state = MSG_QUEUED;
-                    (*m)->state_ts = now;
-                    m_queue_list[(*m)->priority].push_back( *m );
-                    m_count_queued++;
-                    m_pop_cv.notify_one();
-
-                    // Remove from delay set
-                    m_msg_delay.erase( m );
-                } else {
-                    break;
+                    m_delay_cv.wait_for( lock, (*m)->state_ts - now );
                 }
+            } else {
+                /*if ( m_err_cb ) {
+                    (*m_err_cb)( "Waiting w/o timeout" );
+                }*/
+
+                m_delay_cv.wait( lock );
+            }
+
+            if ( !m_run ){
+                return;
+            }
+
+            // See if one or messages are ready to queue
+            if ( m_msg_delay.size() ) {
+                now = std::chrono::system_clock::now();
+
+                while ( m_msg_delay.size() ) {
+                    m = m_msg_delay.begin();
+
+                    if ( (*m)->state_ts <= now ) {
+                        /*if ( m_err_cb ) {
+                            (*m_err_cb)( string("Queuing delayed msg ID ") + (*m)->message.id );
+                        }*/
+
+                        // Msg is ready, push to queue
+                        (*m)->state = MSG_QUEUED;
+                        (*m)->state_ts = now;
+                        m_queue_list[(*m)->priority].push_back( *m );
+                        m_count_queued++;
+                        m_pop_cv.notify_one();
+
+                        // Remove from delay set
+                        m_msg_delay.erase( m );
+                    } else {
+                        break;
+                    }
+                }
+            }
+        } catch ( const exception & e ) {
+            if ( m_err_cb ) {
+                (*m_err_cb)( e.what() );
             }
         }
     }

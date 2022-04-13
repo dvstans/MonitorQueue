@@ -49,7 +49,7 @@ void logger( const string & a_msg ) {
 }
 
 int main( int argc, char ** argv ) {
-    size_t  i;
+    size_t  i, act, failed, free;
     Queue   q( 3, 100, 1000, 0, 30000, 250, &logger );
     vector<thread*> workers;
 
@@ -73,12 +73,17 @@ int main( int argc, char ** argv ) {
     q.push( "2000", 0, 2000 );
 
     // Wait for msgs to be processed
-    while ( q.count()) {
+    while ( true ) {
+        q.getCounts( act, failed, free );
+        if ( !act ) {
+            break;
+        }
         this_thread::sleep_for(chrono::milliseconds( 500 ));
     }
 
     if ( deque_ts.size() != 5 ) {
         cerr << "Invalid result set size" << endl;
+        cerr << "size " << deque_ts.size() << ", active: " << act << endl;
         abort();
     }
 

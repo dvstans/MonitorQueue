@@ -79,11 +79,9 @@ public:
     //----- Methods for use by monitoring process
 
     void            setErrorCallback( ErrorCB_t * a_callback );
-    size_t          count();
-    size_t          freeCount();
-    size_t          workingCount();
-    size_t          failedCount();
-    MsgIdList_t     getFailed();
+    size_t          getCapacity() const;
+    void            getCounts( size_t & a_active, size_t & a_failed, size_t & a_free ) const;
+    MsgIdList_t     getFailed() const;
     MsgIdList_t     eraseFailed( const MsgIdList_t & a_msg_ids );
 
 private:
@@ -169,7 +167,7 @@ private:
     std::condition_variable     m_mon_cv;           ///< Monitoring cond var
     std::thread                 m_delay_thread;     ///< Delay thread
     std::condition_variable     m_delay_cv;         ///< Delay cond var
-    std::mutex                  m_mutex;            ///< Mutex for all shared message structures
+    mutable std::mutex          m_mutex;            ///< Mutex for all shared message structures
     std::condition_variable     m_pop_cv;           ///< Cond var for pop methods
     msg_pool_t                  m_msg_pool;         ///< Message entry memory pool
     msg_map_t                   m_msg_map;          ///< Message ID to entry index
