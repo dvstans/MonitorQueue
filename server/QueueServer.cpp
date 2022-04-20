@@ -26,34 +26,9 @@ class Handler : public HTTPRequestHandler {
   public:
 
     Handler( Queue & a_queue ) : m_queue( a_queue ) {
-        //cout << "Handler ctor " << this << endl;
-
-        /* unit test - move to test code
-        string msg_json;
-        libjson::Value req_json;
-
-        for ( int i = 0; i < 100000; i++ ){
-            m_queue.push( to_string( i ), 0, 0 );
-            const Queue::Msg_t & msg = m_queue.pop();
-
-            msg_json = string("{\"type\":\"msg\",\"id\":\"") + msg.id + "\",\"tok\":" + to_string( msg.token ) + "}";
-
-            try {
-                req_json.fromString( msg_json );
-                libjson::Value::Object & ack = req_json.asObject();
-
-                //cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
-                m_queue.ack( ack.getString("id"), (uint64_t)ack.getNumber("tok"), false, 0 );
-
-            } catch ( exception & e ) {
-                cout << "exception: " << e.what() << endl;
-            }
-        }
-        */
     }
 
     ~Handler() {
-        //cout << "Handler dtor " << this << endl;
     }
 
     void handleRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
@@ -68,6 +43,17 @@ class Handler : public HTTPRequestHandler {
     }
 
   private:
+    std::string readBody( HTTPServerRequest & a_request ) {
+        string body;
+        ssize_t size = a_request.getContentLength();
+
+        if ( size > 0 ) {
+            body.resize( size );
+            a_request.stream().read( &body[0], size );
+        }
+
+        return body;
+    }
 
     /** @brief Push one or more messages into queue
      *
@@ -78,14 +64,14 @@ class Handler : public HTTPRequestHandler {
      * Response is empty (success), or JSON error document
      */
     void PushRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
-        cout << "PushRequest" << endl;
+        //cout << "PushRequest" << endl;
 
         if ( a_request.getMethod() == "POST" ) {
-            size_t  active, failed, free;
-            string body( istreambuf_iterator<char>( a_request.stream() ), {});
+            size_t active, failed, free;
             libjson::Value req_json;
 
             try {
+                string body = readBody( a_request );
                 req_json.fromString( body );
 
                 libjson::Value::Array & arr = req_json.asArray();
@@ -124,7 +110,7 @@ class Handler : public HTTPRequestHandler {
      *   { type: msg, id: <string>, tok: <uint> }
      */
     void PopRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
-        cout << "PopRequest" << endl;
+        //cout << "PopRequest" << endl;
 
         if ( a_request.getMethod() == "POST" ) {
             const Queue::Msg_t & msg = m_queue.pop();
@@ -146,14 +132,14 @@ class Handler : public HTTPRequestHandler {
      */
     void AckRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
         if ( a_request.getMethod() == "POST" ) {
-            string body( istreambuf_iterator<char>( a_request.stream() ), {});
             libjson::Value req_json;
 
             try {
+                string body = readBody( a_request );
                 req_json.fromString( body );
                 libjson::Value::Object & ack = req_json.asObject();
 
-                cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
+                //cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
                 m_queue.ack(
                     ack.getString("id"),
                     (uint64_t)ack.getNumber("tok"),
@@ -173,14 +159,14 @@ class Handler : public HTTPRequestHandler {
 
     void PopAckRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
         if ( a_request.getMethod() == "POST" ) {
-            string body( istreambuf_iterator<char>( a_request.stream() ), {});
             libjson::Value req_json;
 
             try {
+                string body = readBody( a_request );
                 req_json.fromString( body );
                 libjson::Value::Object & ack = req_json.asObject();
 
-                cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
+                //cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
 
                 m_queue.ack(
                     ack.getString("id"),
@@ -251,10 +237,10 @@ class Handler : public HTTPRequestHandler {
 
     void EraseFailedRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
         if ( a_request.getMethod() == "POST" ) {
-            string body( istreambuf_iterator<char>( a_request.stream() ), {});
             libjson::Value req_json;
 
             try {
+                string body = readBody( a_request );
                 req_json.fromString( body );
                 libjson::Value::Array & req_ids = req_json.asArray();
                 Queue::MsgIdList_t ids;
