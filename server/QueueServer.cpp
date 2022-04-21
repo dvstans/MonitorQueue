@@ -3,6 +3,7 @@
 #include <chrono>
 #include <thread>
 #include <Poco/Exception.h>
+#include <Poco/Timespan.h>
 #include <Poco/Net/HTTPRequestHandler.h>
 #include <Poco/Net/HTTPRequestHandlerFactory.h>
 #include <Poco/Net/HTTPServerRequest.h>
@@ -38,7 +39,7 @@ class Handler : public HTTPRequestHandler {
         if ( r != m_route_map.end() ) {
             (this->*(r->second))( a_request, a_response );
         } else {
-            prepResponse( a_response, HTTPResponse::HTTP_NOT_FOUND );
+            sendResponse( a_response, 0, HTTPResponse::HTTP_NOT_FOUND );
         }
     }
 
@@ -53,6 +54,18 @@ class Handler : public HTTPRequestHandler {
         }
 
         return body;
+    }
+
+    /** @brief Ping request to verify server running
+     *
+     * No request/reply parameters or payload.
+     */
+    void PingRequest( HTTPServerRequest & a_request, HTTPServerResponse & a_response ) {
+        if ( a_request.getMethod() == "POST" ) {
+            sendResponse( a_response, 0, HTTPResponse::HTTP_OK );
+        } else {
+            sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+        }
     }
 
     /** @brief Push one or more messages into queue
@@ -90,14 +103,13 @@ class Handler : public HTTPRequestHandler {
                     m_queue.push( msg.getString("id"), (uint8_t)msg.getNumber("pri"), (size_t)(msg.has("del")?m->asNumber():0) );
                 }
 
-                prepResponse( a_response, HTTPResponse::HTTP_OK );
+                sendResponse( a_response, 0, HTTPResponse::HTTP_OK );
             } catch( exception & e ) {
-                cerr << e.what() << endl;
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
+                string payload = string( "{\"type\":\"error\",\"message\":\"" ) + e.what() + "\"}";
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_BAD_REQUEST );
             }
         } else {
-            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+            sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
@@ -115,10 +127,10 @@ class Handler : public HTTPRequestHandler {
         if ( a_request.getMethod() == "POST" ) {
             const Queue::Msg_t & msg = m_queue.pop();
 
-            ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-            out << "{\"type\":\"msg\",\"id\":\"" << msg.id << "\",\"tok\":"<< msg.token <<"}";
+            string payload = "{\"type\":\"msg\",\"id\":\"" + msg.id + "\",\"tok\":" + to_string( msg.token ) + "}";
+            sendResponse( a_response, &payload, HTTPResponse::HTTP_OK );
         } else {
-            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+            sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
@@ -147,13 +159,13 @@ class Handler : public HTTPRequestHandler {
                     (size_t)(ack.has("del")?ack.asNumber():0)
                 );
 
-                prepResponse( a_response, HTTPResponse::HTTP_OK );
+                sendResponse( a_response, 0, HTTPResponse::HTTP_OK );
             } catch( exception & e ) {
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
+                string payload = string( "{\"type\":\"error\",\"message\":\"" ) + e.what() + "\"}";
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_BAD_REQUEST );
             }
         } else {
-            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+            sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
@@ -177,14 +189,14 @@ class Handler : public HTTPRequestHandler {
 
                 const Queue::Msg_t & msg = m_queue.pop();
 
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-                out << "{\"type\":\"msg\",\"id\":\"" << msg.id << "\",\"tok\":"<< msg.token <<"}";
+                string payload = "{\"type\":\"msg\",\"id\":\"" + msg.id + "\",\"tok\":" + to_string( msg.token ) + "}";
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_OK );
             } catch( exception & e ) {
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
+                string payload = string( "{\"type\":\"error\",\"message\":\"" ) + e.what() + "\"}";
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_BAD_REQUEST );
             }
         } else {
-            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+            sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
@@ -195,19 +207,20 @@ class Handler : public HTTPRequestHandler {
 
                 m_queue.getCounts( active, failed, free );
 
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-                out << "{\"type\":\"count\",\"capacity\":" << m_queue.getCapacity()
-                    << ",\"active\":" << active
-                    << ",\"failed\":" << failed
-                    << ",\"free\":" << free
-                    << "}";
+                string payload = "{\"type\":\"count\",\"capacity\":" + to_string( m_queue.getCapacity() )
+                    + ",\"active\":" + to_string( active )
+                    + ",\"failed\":" + to_string( failed )
+                    + ",\"free\":" + to_string( free )
+                    + "}";
+
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_OK );
 
             } catch( exception & e ) {
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
+                string payload = string( "{\"type\":\"error\",\"message\":\"" ) + e.what() + "\"}";
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_BAD_REQUEST );
             }
         } else {
-            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+            sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
@@ -216,22 +229,23 @@ class Handler : public HTTPRequestHandler {
             try {
                 Queue::MsgIdList_t failed = m_queue.getFailed();
 
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-                out << "{\"type\":\"failed\",\"ids\":[";
+                string payload = "{\"type\":\"failed\",\"ids\":[";
                 for ( Queue::MsgIdList_t::iterator i = failed.begin(); i != failed.end(); i++ ) {
                     if ( i != failed.begin() ){
-                        out << ",";
+                        payload += ",";
                     }
-                    out << "\"" << *i << "\"";
+                    payload += "\"" + *i + "\"";
                 }
-                out << "]}";
+                payload += "]}";
+
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_OK );
 
             } catch( exception & e ) {
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
+                string payload = string( "{\"type\":\"error\",\"message\":\"" ) + e.what() + "\"}";
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_BAD_REQUEST );
             }
         } else {
-            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+            sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
@@ -251,31 +265,37 @@ class Handler : public HTTPRequestHandler {
 
                 Queue::MsgIdList_t erased = m_queue.eraseFailed( ids );
 
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_OK );
-                out << "{\"type\":\"erased\",\"ids\":[";
+                string payload = "{\"type\":\"erased\",\"ids\":[";
                 for ( Queue::MsgIdList_t::iterator i = erased.begin(); i != erased.end(); i++ ) {
                     if ( i != erased.begin() ){
-                        out << ",";
+                        payload += ",";
                     }
-                    out << "\"" << *i << "\"";
+                    payload += "\"" + *i + "\"";
                 }
-                out << "]}";
+                payload += "]}";
 
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_OK );
             } catch( exception & e ) {
-                ostream & out = prepResponse( a_response, HTTPResponse::HTTP_BAD_REQUEST );
-                out << "{\"type\":\"error\",\"message\":\"" << e.what() << "\"}";
+                string payload = string( "{\"type\":\"error\",\"message\":\"" ) + e.what() + "\"}";
+                sendResponse( a_response, &payload, HTTPResponse::HTTP_BAD_REQUEST );
             }
         } else {
-            prepResponse( a_response, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
+            sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
         }
     }
 
-
-    ostream & prepResponse( HTTPServerResponse & a_response, HTTPResponse::HTTPStatus a_status ) {
+    void sendResponse( HTTPServerResponse & a_response, string * a_payload, HTTPResponse::HTTPStatus a_status ) {
         a_response.setStatus( a_status );
-        a_response.setContentType( "json/html" );
+        a_response.setContentType("application/json");
 
-        return a_response.send();
+        if ( a_payload ){
+            //a_response.setContentLength( a_payload->size() );
+            //ostream & out = a_response.send();
+            //out.write( &(*a_payload)[0], a_payload->size() );
+            a_response.sendBuffer( &(*a_payload)[0], a_payload->size());
+        } else {
+            a_response.send();
+        }
     }
 
     friend QueueServer;
@@ -287,6 +307,7 @@ class Handler : public HTTPRequestHandler {
 
     static void setupRouteMap() {
         if ( !m_route_map.size() ) {
+            m_route_map["/ping"] = &Handler::PingRequest;
             m_route_map["/push"] = &Handler::PushRequest;
             m_route_map["/pop"] = &Handler::PopRequest;
             m_route_map["/ack"] = &Handler::AckRequest;
@@ -326,6 +347,10 @@ QueueServer::QueueServer() : m_queue( 3, 100, 5000, 3 ) {
 
         m_server_params = new HTTPServerParams();
         m_server_params->setServerName( "mqserver" );
+        m_server_params->setKeepAlive(true);
+        m_server_params->setKeepAliveTimeout( Timespan( 5, 0 ));
+        m_server_params->setMaxKeepAliveRequests( 10 );
+
         m_server = new HTTPServer( new HandlerFactory( m_queue ), ServerSocket(8080), m_server_params );
     } catch ( const Poco::Exception & e ) {
         cout << "ctor exception: " << e.displayText() << endl;

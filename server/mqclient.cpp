@@ -1,6 +1,7 @@
 #include <stdexcept>
 #include <iostream>
 #include <chrono>
+#include <Poco/Timespan.h>
 #include <Poco/URI.h>
 #include <Poco/Net/HTTPClientSession.h>
 #include <Poco/Net/HTTPRequest.h>
@@ -13,8 +14,10 @@ using namespace Poco::Net;
 void doRequest( HTTPClientSession& session, HTTPRequest& request, string * body, libjson::Value & reply ) {
     HTTPResponse response;
 
-    request.setContentType( "application/json" );
     request.setContentLength( body?body->size():0 );
+    if ( body ){
+        request.setContentType( "application/json" );
+    }
 
     ostream& ws = session.sendRequest(request);
 
@@ -27,14 +30,26 @@ void doRequest( HTTPClientSession& session, HTTPRequest& request, string * body,
 
     //cout << response.getStatus() << " " << response.getReason() << std::endl;
 
-    string reply_body( istreambuf_iterator<char>( rs ), {});
+    ssize_t size = response.getContentLength();
 
-    //cout << "reply: " << reply_body << endl;
+    //cout << "reply cont len: " << size << endl;
 
-    reply.fromString( reply_body );
+    if ( size > 0 ) {
+        string reply_body;
+        reply_body.resize( size );
+        rs.read( &reply_body[0], size );
 
-    if ( response.getStatus() != HTTPResponse::HTTP_OK ) {
-        throw runtime_error( string("Request failed: ") + reply_body );
+        if ( response.getStatus() != HTTPResponse::HTTP_OK ) {
+            throw runtime_error( string("Request failed: ") + reply_body );
+        }
+
+        reply.fromString( reply_body );
+    } else {
+        reply.clear();
+
+        if ( response.getStatus() != HTTPResponse::HTTP_OK ) {
+            throw runtime_error( string("Request failed: ") + to_string( response.getStatus() ));
+        }
     }
 }
 
@@ -148,13 +163,38 @@ void testPop( HTTPClientSession & session, size_t offset, size_t count ){
     }
 }
 
+void testPingSpeed( HTTPClientSession & session ){
+    cout << "testPingSpeed: ";
+    cout.flush();
+
+    try {
+        libjson::Value reply;
+        HTTPRequest request( HTTPRequest::HTTP_POST, "/ping", HTTPMessage::HTTP_1_1 );
+
+        auto t1 = chrono::system_clock::now();
+
+        for ( size_t j = 0; j < 10000; j++ ){
+            doRequest( session, request, 0, reply );
+        }
+
+        auto t2 = chrono::system_clock::now();
+        chrono::duration<double> diff = t2 - t1;
+
+        cout << diff.count() << " sec, " << (10000/diff.count()) << " req/sec\n";
+    } catch ( exception & e ) {
+        cout << "FAILED - ";
+        cout << e.what() << endl;
+    }
+}
+
 void testPushPopSpeed( HTTPClientSession & session ){
     cout << "testPushPopSpeed: ";
+    cout.flush();
 
     try {
         auto t1 = chrono::system_clock::now();
 
-        for ( size_t j = 0; j < 10; j++ ){
+        for ( size_t j = 0; j < 20; j++ ){
             doPush( session, j * 100, 100 );
             doPop( session, j * 100, 100 );
         }
@@ -162,7 +202,7 @@ void testPushPopSpeed( HTTPClientSession & session ){
         auto t2 = chrono::system_clock::now();
         chrono::duration<double> diff = t2 - t1;
 
-        cout << diff.count() << " sec, " << (1000/diff.count()) << " req/sec\n";
+        cout << diff.count() << " sec, " << (2000/diff.count()) << " req/sec\n";
     } catch ( exception & e ) {
         cout << "FAILED - ";
         cout << e.what() << endl;
@@ -177,13 +217,20 @@ int main( int argc, char ** argv ) {
 
         Poco::URI uri("http://localhost:8080");
         HTTPClientSession session( uri.getHost(), uri.getPort());
+        session.setKeepAlive( true );
+        session.setKeepAliveTimeout( Poco::Timespan( 5, 0 ));
 
+        /*
         testCount( session, 0, 0 );
         testPush( session, 0, 100 );
         testCount( session, 100, 0 );
         testPop( session, 0, 100 );
         testCount( session, 0, 0 );
+        testPingSpeed( session );
         testPushPopSpeed( session );
+        */
+        testPingSpeed( session );
+
     } catch ( const Poco::Exception & e ) {
         cerr << "Poco exception: " << e.displayText() << endl;
         abort();
