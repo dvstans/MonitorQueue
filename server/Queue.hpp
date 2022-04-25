@@ -41,7 +41,7 @@ public:
     struct Msg_t {
         std::string     id;     ///< Unique producer-specified message ID
         //std::string     data;   ///< Optional producer-specified data payload
-        uint64_t        token;  ///< Queue defined message token required for ACK
+        std::string     token;  ///< Queue defined message token required for ACK
     };
 
     typedef std::vector<std::string> MsgIdList_t;           ///< Message ID list type
@@ -66,14 +66,8 @@ public:
     //----- Methods for use by consumer(s)
 
     const Msg_t &   pop();
-    void            ack( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_delay = 0 );
-    const Msg_t &   popAck( const std::string & a_id, uint64_t a_token, bool a_requeue = false, size_t a_delay = 0 );
-
-    // Prevent implcit conversions of token types on Ack methods
-    template <typename T>
-    void            ack( const std::string & a_id, T a_token, bool a_requeue = false ) = delete;
-    template <typename T>
-    void            popAck( const std::string & a_id, T a_token, bool a_requeue = false ) = delete;
+    void            ack( const std::string & a_id, const std::string & a_token, bool a_requeue = false, size_t a_delay = 0 );
+    const Msg_t &   popAck( const std::string & a_id, const std::string & a_token, bool a_requeue = false, size_t a_delay = 0 );
 
 
     //----- Methods for use by monitoring process
@@ -105,7 +99,7 @@ private:
             fail_count( 0 ),
             state( MSG_QUEUED ),
             state_ts( std::chrono::system_clock::now() ),
-            message(Msg_t{ a_id, /*a_data,*/ 0 })
+            message(Msg_t{ a_id })
         {};
 
         /// Reset message for re-use
@@ -117,7 +111,7 @@ private:
             state_ts = std::chrono::system_clock::now();
             message.id = a_id;
             /*message.data = a_data;*/
-            message.token = 0;
+            message.token.clear();
         }
 
         uint8_t                 priority;   ///< Message priority
@@ -148,7 +142,7 @@ private:
 
     MsgEntry_t *    getMsgEntry( const std::string & a_id, /*const std::string & a_data,*/ uint8_t a_priority );
     const Msg_t &   popImpl( std::unique_lock<std::mutex> & a_lock );
-    void            ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_delay );
+    void            ackImpl( const std::string & a_id, const std::string & a_token, bool a_requeue, size_t a_delay );
     void            insertDelayedMsg( MsgEntry_t * a_msg, const timestamp_t & a_requeue_ts  );
     void            monitorThread();
     void            delayThread();

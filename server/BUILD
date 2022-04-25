@@ -2,7 +2,7 @@ cc_binary(
     name = "mqserver",
     srcs = glob(["libjson.hpp","Queue.hpp","Queue.cpp","QueueServer.hpp","QueueServer.cpp","mqserver.cpp"]),
     includes = ["."],
-    linkopts = ["-lpthread","-lPocoFoundation","-lPocoNet"],
+    linkopts = ["-lpthread","-lboost_program_options","-lPocoFoundation","-lPocoNet"],
     visibility = ["//visibility:public"]
 )
 

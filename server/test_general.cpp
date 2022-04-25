@@ -35,8 +35,8 @@ void workerThread( Queue & queue, size_t id ) {
     const Queue::Msg_t * msg = &queue.pop();
     size_t ms, loc_count = 0;
     bool cont, fail;
-    string msg_id;
-    uint64_t msg_tok;
+    string msg_id, msg_tok;
+
     chrono::time_point<chrono::system_clock> now;
 
     do {

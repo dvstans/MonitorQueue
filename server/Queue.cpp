@@ -94,7 +94,7 @@ Queue::pop() {
 }
 
 void
-Queue::ack( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_delay ) {
+Queue::ack( const std::string & a_id, const std::string & a_token, bool a_requeue, size_t a_delay ) {
     unique_lock<mutex> lock(m_mutex);
 
     ackImpl( a_id, a_token, a_requeue, a_delay );
@@ -102,7 +102,7 @@ Queue::ack( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a
 
 
 const Queue::Msg_t &
-Queue::popAck( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_delay ) {
+Queue::popAck( const std::string & a_id, const std::string & a_token, bool a_requeue, size_t a_delay ) {
     unique_lock<mutex> lock(m_mutex);
 
     ackImpl( a_id, a_token, a_requeue, a_delay );
@@ -118,6 +118,8 @@ Queue::getCapacity() const {
 void
 Queue::getCounts( size_t & a_active, size_t & a_failed, size_t & a_free ) const {
     lock_guard<mutex> lock(m_mutex);
+
+    //cout << "counts: " << ( m_msg_map.size() - m_count_failed ) << ", " << m_count_failed << ", " << m_capacity - m_msg_map.size() << endl;
 
     a_active = m_msg_map.size() - m_count_failed;
     a_failed = m_count_failed;
@@ -159,6 +161,8 @@ Queue::eraseFailed( const MsgIdList_t & a_msg_ids ) {
             }
         }
     }
+
+    m_count_failed -= failed.size();
 
     return failed;
 }
@@ -215,7 +219,7 @@ Queue::popImpl( unique_lock<mutex> & a_lock ) {
 
     entry->state = MSG_RUNNING;
     entry->state_ts = std::chrono::system_clock::now();
-    entry->message.token = m_rng() & 0x001FFFFFFFFFFFFF; // Clamp to 53 bits for JSON compatibility
+    entry->message.token = to_string( m_rng() );
     m_count_queued--;
 
     return entry->message;
@@ -223,7 +227,7 @@ Queue::popImpl( unique_lock<mutex> & a_lock ) {
 
 
 void
-Queue::ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size_t a_delay ) {
+Queue::ackImpl( const std::string & a_id, const std::string & a_token, bool a_requeue, size_t a_delay ) {
     // Lock must be held before calling
 
     msg_map_t::iterator e = m_msg_map.find( a_id );
@@ -244,7 +248,7 @@ Queue::ackImpl( const std::string & a_id, uint64_t a_token, bool a_requeue, size
         timestamp_t now = std::chrono::system_clock::now();
 
         e->second->boosted = false;
-        e->second->message.token = 0;
+        e->second->message.token.clear();
 
         if ( a_delay ) {
             insertDelayedMsg( e->second, now + std::chrono::milliseconds( a_delay ));
@@ -318,10 +322,12 @@ Queue::monitorThread() {
                         } else {
                             // Retry message
                             m->second->state = MSG_QUEUED;
-                            m->second->message.token = 0;
+                            m->second->message.token.clear();
                             m_queue_list[m->second->priority].push_front( m->second );
                             m_count_queued++;
                             notify++;
+
+                            //cout << "RETRY MSG ID " << m->first << endl;
 
                             /*if ( m_err_cb ) {
                                 (*m_err_cb)( string("RETRY MSG ID ") + m->first );
@@ -336,6 +342,7 @@ Queue::monitorThread() {
                             /*if ( m_err_cb ) {
                                 (*m_err_cb)( string("PRIORITY BOOST MSG ID ") + m->first );
                             }*/
+                            //cout << "PRIORITY BOOST MSG ID " << m->first << endl;
 
                             m->second->boosted = true;
                             // Remove entry from current queue

@@ -1,6 +1,8 @@
 #include <stdexcept>
 #include <iostream>
+#include <vector>
 #include <chrono>
+#include <thread>
 #include <Poco/Timespan.h>
 #include <Poco/URI.h>
 #include <Poco/Net/HTTPClientSession.h>
@@ -23,7 +25,8 @@ void doRequest( HTTPClientSession& session, HTTPRequest& request, string * body,
 
     if ( body ){
         ws << *body;
-        //ws.flush();
+        ws.flush();
+        //cout << "body[" << *body << "]" << endl;
     }
 
     istream& rs = session.receiveResponse(response);
@@ -38,6 +41,8 @@ void doRequest( HTTPClientSession& session, HTTPRequest& request, string * body,
         string reply_body;
         reply_body.resize( size );
         rs.read( &reply_body[0], size );
+
+        //cout << "reply[" << reply_body << "]" << endl;
 
         if ( response.getStatus() != HTTPResponse::HTTP_OK ) {
             throw runtime_error( string("Request failed: ") + reply_body );
@@ -92,7 +97,9 @@ void doPush( HTTPClientSession & session, size_t offset, size_t count ) {
         if ( i > 0 ) {
             body += ",";
         }
-        body += "{\"id\":\"" + to_string( offset + i ) + "\",\"pri\":0}";
+        body += "{\"id\":\"";
+        body += to_string( offset + i );
+        body += "\",\"pri\":0}";
     }
     body += "]";
 
@@ -113,13 +120,13 @@ void testPush( HTTPClientSession & session, size_t offset, size_t count ){
     }
 }
 
+
 void doPop( HTTPClientSession & session, size_t offset, size_t count ){
     HTTPRequest request( HTTPRequest::HTTP_POST, "/pop", HTTPMessage::HTTP_1_1 );
 
     libjson::Value reply;
-    string body, id;
+    string body, id, tok;
     size_t id_int;
-    uint64_t tok;
 
     for ( size_t i = 0; i < count; i++ ) {
         // Verify ID is within offset -> offset + count
@@ -128,14 +135,19 @@ void doPop( HTTPClientSession & session, size_t offset, size_t count ){
             doRequest( session, request, 0, reply );
             request.setURI( "/pop_ack" );
         } else {
-            body = "{\"id\":\"" + id + "\",\"tok\":" + to_string( tok ) + "}";
+            body = "{\"id\":\"";
+            body += id;
+            body += "\",\"tok\":\"";
+            body += tok;
+            body += "\"}";
+
             doRequest( session, request, &body, reply );
         }
 
         // Verify reply
         libjson::Value::Object & obj = reply.asObject();
         id = obj.getString( "id" );
-        tok = obj.getNumber( "tok" );
+        tok = obj.getString( "tok" );
         id_int = stoi( id );
 
         //cout << "i: " << i << ", ID: " << id << endl;
@@ -146,7 +158,7 @@ void doPop( HTTPClientSession & session, size_t offset, size_t count ){
     }
 
     request.setURI( "/ack" );
-    body = "{\"id\":\"" + id + "\",\"tok\":" + to_string( tok ) + "}";
+    body = "{\"id\":\"" + id + "\",\"tok\":\"" + tok + "\"}";
     doRequest( session, request, &body, reply );
 }
 
@@ -155,6 +167,96 @@ void testPop( HTTPClientSession & session, size_t offset, size_t count ){
 
     try {
         doPop( session, offset, count );
+
+        cout << "OK\n";
+    } catch ( exception & e ) {
+        cout << "FAILED - ";
+        cout << e.what() << endl;
+    }
+}
+
+void doGetFailed( HTTPClientSession & session, vector<string> & ids ) {
+    libjson::Value reply;
+
+    ids.clear();
+
+    HTTPRequest request( HTTPRequest::HTTP_GET, "/failed", HTTPMessage::HTTP_1_1 );
+    doRequest( session, request, 0, reply );
+
+    libjson::Value::Object & obj = reply.asObject();
+    libjson::Value::Array & arr = obj.getArray( "ids" );
+    for ( libjson::Value::ArrayIter i = arr.begin(); i != arr.end(); i++ ) {
+        ids.push_back( i->asString() );
+        //cout << " " << i->asString() << endl;
+    }
+}
+
+void doEraseFailed( HTTPClientSession & session, vector<string> & ids ) {
+    libjson::Value reply;
+    string body;
+
+    body = "[";
+    for ( vector<string>::iterator i = ids.begin(); i != ids.end(); i++ ) {
+        body += "\"";
+        body += *i;
+        body += "\"";
+    }
+    body += "]";
+
+    HTTPRequest request( HTTPRequest::HTTP_POST, "/failed/erase", HTTPMessage::HTTP_1_1 );
+    doRequest( session, request, &body, reply );
+}
+
+void testFailureHanding( HTTPClientSession & session ){
+    cout << "testFailureHanding: ";
+    cout.flush();
+
+    libjson::Value reply;
+
+    try {
+        doPush( session, 0, 1 );
+
+        HTTPRequest request( HTTPRequest::HTTP_POST, "/pop", HTTPMessage::HTTP_1_1 );
+
+        // Pop twice, assuming max retries == 1
+        for ( int i = 0; i < 2; i++ ) {
+            doRequest( session, request, 0, reply );
+
+            // Wait 2 seconds (assuming 1 sec ack timeout)
+            this_thread::sleep_for( chrono::seconds( 2 ));
+        }
+
+        // Get count and verify 1 failed message
+        HTTPRequest count_request( HTTPRequest::HTTP_GET, "/count", HTTPMessage::HTTP_1_1 );
+        doRequest( session, count_request, 0, reply );
+        libjson::Value::Object & obj = reply.asObject();
+
+        //cout << "act: " << obj.getNumber( "active" ) << ", failed: " << obj.getNumber( "failed" ) << endl;
+
+        if ( obj.getNumber( "failed" ) != 1 ){
+            throw runtime_error( "Incorrect failed count" );
+        }
+
+        if ( obj.getNumber( "active" ) != 0 ){
+            throw runtime_error( "Incorrect active count" );
+        }
+
+        vector<string> ids;
+        doGetFailed( session, ids );
+        doEraseFailed( session, ids );
+
+        doRequest( session, count_request, 0, reply );
+        libjson::Value::Object & obj2 = reply.asObject();
+
+        //cout << "act: " << obj2.getNumber( "active" ) << ", failed: " << obj2.getNumber( "failed" ) << endl;
+
+        if ( obj2.getNumber( "failed" ) != 0 ){
+            throw runtime_error( "Incorrect failed count after erase" );
+        }
+
+        if ( obj2.getNumber( "active" ) != 0 ){
+            throw runtime_error( "Incorrect active count after erase" );
+        }
 
         cout << "OK\n";
     } catch ( exception & e ) {
@@ -173,14 +275,14 @@ void testPingSpeed( HTTPClientSession & session ){
 
         auto t1 = chrono::system_clock::now();
 
-        for ( size_t j = 0; j < 10000; j++ ){
+        for ( size_t j = 0; j < 5000; j++ ){
             doRequest( session, request, 0, reply );
         }
 
         auto t2 = chrono::system_clock::now();
         chrono::duration<double> diff = t2 - t1;
 
-        cout << diff.count() << " sec, " << (10000/diff.count()) << " req/sec\n";
+        cout << diff.count() << " sec, " << (5000/diff.count()) << " req/sec\n";
     } catch ( exception & e ) {
         cout << "FAILED - ";
         cout << e.what() << endl;
@@ -194,15 +296,17 @@ void testPushPopSpeed( HTTPClientSession & session ){
     try {
         auto t1 = chrono::system_clock::now();
 
-        for ( size_t j = 0; j < 20; j++ ){
+        for ( size_t j = 0; j < 40; j++ ){
+            //cout << "push" << endl;
             doPush( session, j * 100, 100 );
+            //cout << "pop" << endl;
             doPop( session, j * 100, 100 );
         }
 
         auto t2 = chrono::system_clock::now();
         chrono::duration<double> diff = t2 - t1;
 
-        cout << diff.count() << " sec, " << (2000/diff.count()) << " req/sec\n";
+        cout << diff.count() << " sec, " << (4000/diff.count()) << " req/sec\n";
     } catch ( exception & e ) {
         cout << "FAILED - ";
         cout << e.what() << endl;
@@ -211,26 +315,24 @@ void testPushPopSpeed( HTTPClientSession & session ){
 
 int main( int argc, char ** argv ) {
     try {
-        /*string test = "{\"id\":\"10\",\"tok\":7345895478921745}";
-        libjson::Value v;
-        v.fromString( test );*/
-
         Poco::URI uri("http://localhost:8080");
         HTTPClientSession session( uri.getHost(), uri.getPort());
         session.setKeepAlive( true );
         session.setKeepAliveTimeout( Poco::Timespan( 5, 0 ));
 
-        /*
+#if 1
         testCount( session, 0, 0 );
         testPush( session, 0, 100 );
         testCount( session, 100, 0 );
         testPop( session, 0, 100 );
         testCount( session, 0, 0 );
+        testFailureHanding( session );
         testPingSpeed( session );
         testPushPopSpeed( session );
-        */
+#else
         testPingSpeed( session );
-
+        testPushPopSpeed( session );
+#endif
     } catch ( const Poco::Exception & e ) {
         cerr << "Poco exception: " << e.displayText() << endl;
         abort();

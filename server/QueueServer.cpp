@@ -90,6 +90,9 @@ class Handler : public HTTPRequestHandler {
                 libjson::Value::Array & arr = req_json.asArray();
                 for ( libjson::Value::ArrayIter m = arr.begin(); m != arr.end(); m++ ) {
                     libjson::Value::Object & msg = m->asObject();
+                    msg.has("id");
+                    msg.has("pri");
+                    msg.has("del");
 
                     // TODO This is a hack until push has a built-in wait/timeout
                     while ( true ) {
@@ -127,7 +130,12 @@ class Handler : public HTTPRequestHandler {
         if ( a_request.getMethod() == "POST" ) {
             const Queue::Msg_t & msg = m_queue.pop();
 
-            string payload = "{\"type\":\"msg\",\"id\":\"" + msg.id + "\",\"tok\":" + to_string( msg.token ) + "}";
+            string payload = "{\"type\":\"msg\",\"id\":\"";
+            payload += msg.id;
+            payload += "\",\"tok\":\"";
+            payload += msg.token;
+            payload += "\"}";
+
             sendResponse( a_response, &payload, HTTPResponse::HTTP_OK );
         } else {
             sendResponse( a_response, 0, HTTPResponse::HTTP_METHOD_NOT_ALLOWED );
@@ -154,7 +162,7 @@ class Handler : public HTTPRequestHandler {
                 //cout << "tok" << ack.getNumber("tok") << ", as int: " << (uint64_t)ack.getNumber("tok") << "\n";
                 m_queue.ack(
                     ack.getString("id"),
-                    (uint64_t)ack.getNumber("tok"),
+                    ack.getString("tok"),
                     ack.has("que")?ack.asBool():false,
                     (size_t)(ack.has("del")?ack.asNumber():0)
                 );
@@ -182,14 +190,19 @@ class Handler : public HTTPRequestHandler {
 
                 m_queue.ack(
                     ack.getString("id"),
-                    (uint64_t)ack.getNumber("tok"),
+                    ack.getString("tok"),
                     ack.has("que")?ack.asBool():false,
                     (size_t)(ack.has("del")?ack.asNumber():0)
                 );
 
                 const Queue::Msg_t & msg = m_queue.pop();
 
-                string payload = "{\"type\":\"msg\",\"id\":\"" + msg.id + "\",\"tok\":" + to_string( msg.token ) + "}";
+                string payload = "{\"type\":\"msg\",\"id\":\"";
+                payload += msg.id;
+                payload += "\",\"tok\":\"";
+                payload += msg.token;
+                payload += "\"}";
+
                 sendResponse( a_response, &payload, HTTPResponse::HTTP_OK );
             } catch( exception & e ) {
                 string payload = string( "{\"type\":\"error\",\"message\":\"" ) + e.what() + "\"}";
@@ -207,14 +220,17 @@ class Handler : public HTTPRequestHandler {
 
                 m_queue.getCounts( active, failed, free );
 
-                string payload = "{\"type\":\"count\",\"capacity\":" + to_string( m_queue.getCapacity() )
-                    + ",\"active\":" + to_string( active )
-                    + ",\"failed\":" + to_string( failed )
-                    + ",\"free\":" + to_string( free )
-                    + "}";
+                string payload = "{\"type\":\"count\",\"capacity\":";
+                payload += to_string( m_queue.getCapacity() );
+                payload += ",\"active\":";
+                payload += to_string( active );
+                payload += ",\"failed\":";
+                payload += to_string( failed );
+                payload += ",\"free\":";
+                payload += to_string( free );
+                payload += "}";
 
                 sendResponse( a_response, &payload, HTTPResponse::HTTP_OK );
-
             } catch( exception & e ) {
                 string payload = string( "{\"type\":\"error\",\"message\":\"" ) + e.what() + "\"}";
                 sendResponse( a_response, &payload, HTTPResponse::HTTP_BAD_REQUEST );
@@ -234,7 +250,9 @@ class Handler : public HTTPRequestHandler {
                     if ( i != failed.begin() ){
                         payload += ",";
                     }
-                    payload += "\"" + *i + "\"";
+                    payload += "\"";
+                    payload += *i;
+                    payload += "\"";
                 }
                 payload += "]}";
 
@@ -270,7 +288,9 @@ class Handler : public HTTPRequestHandler {
                     if ( i != erased.begin() ){
                         payload += ",";
                     }
-                    payload += "\"" + *i + "\"";
+                    payload += "\"";
+                    payload += *i;
+                    payload += "\"";
                 }
                 payload += "]}";
 
@@ -289,12 +309,9 @@ class Handler : public HTTPRequestHandler {
         a_response.setContentType("application/json");
 
         if ( a_payload ){
-            //a_response.setContentLength( a_payload->size() );
-            //ostream & out = a_response.send();
-            //out.write( &(*a_payload)[0], a_payload->size() );
             a_response.sendBuffer( &(*a_payload)[0], a_payload->size());
         } else {
-            a_response.send();
+            a_response.sendBuffer("",0);
         }
     }
 
@@ -339,7 +356,23 @@ class HandlerFactory : public Poco::Net::HTTPRequestHandlerFactory {
 };
 
 
-QueueServer::QueueServer() : m_queue( 3, 100, 5000, 3 ) {
+QueueServer::QueueServer(
+    uint8_t a_priority_count,
+    size_t a_msg_capacity,
+    size_t a_msg_ack_timeout_msec,
+    size_t a_msg_max_retries,
+    size_t a_msg_boost_timeout_msec,
+    size_t a_monitor_period_msec
+) :
+    m_queue(
+        a_priority_count,
+        a_msg_capacity,
+        a_msg_ack_timeout_msec,
+        a_msg_max_retries,
+        a_msg_boost_timeout_msec,
+        a_monitor_period_msec
+    )
+{
     try {
         m_queue.setErrorCallback( &logger );
 

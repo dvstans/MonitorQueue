@@ -9,7 +9,15 @@ namespace MonQueue {
 class QueueServer {
   public:
 
-    QueueServer();
+    QueueServer(
+        uint8_t a_priority_count,
+        size_t a_msg_capacity,
+        size_t a_msg_ack_timeout_msec,
+        size_t a_msg_max_retries,
+        size_t a_msg_boost_timeout_msec,
+        size_t a_monitor_period_msec
+    );
+
     ~QueueServer();
 
     void start();
