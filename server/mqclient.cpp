@@ -58,7 +58,7 @@ void doRequest( HTTPClientSession& session, HTTPRequest& request, string * body,
     }
 }
 
-void testCount( HTTPClientSession & session, size_t active, size_t failed ){
+int testCount( HTTPClientSession & session, size_t active, size_t failed ){
     cout << "testCount: ";
 
     try {
@@ -84,8 +84,10 @@ void testCount( HTTPClientSession & session, size_t active, size_t failed ){
         if ( obj.type() != libjson::Value::VT_NUMBER ) throw runtime_error( "'free' has wrong type" );
 
         cout << "OK\n";
+        return 0;
     } catch ( exception & e ) {
         cout << "FAILED - " << e.what() << endl;
+        return 1;
     }
 }
 
@@ -108,15 +110,17 @@ void doPush( HTTPClientSession & session, size_t offset, size_t count ) {
     doRequest( session, request, &body, reply );
 }
 
-void testPush( HTTPClientSession & session, size_t offset, size_t count ){
+int testPush( HTTPClientSession & session, size_t offset, size_t count ){
     cout << "testPush: ";
 
     try {
         doPush( session, offset, count );
 
         cout << "OK\n";
+        return 0;
     } catch ( ... ) {
         cout << "FAILED\n";
+        return 1;
     }
 }
 
@@ -162,16 +166,18 @@ void doPop( HTTPClientSession & session, size_t offset, size_t count ){
     doRequest( session, request, &body, reply );
 }
 
-void testPop( HTTPClientSession & session, size_t offset, size_t count ){
+int testPop( HTTPClientSession & session, size_t offset, size_t count ){
     cout << "testPop: ";
 
     try {
         doPop( session, offset, count );
 
         cout << "OK\n";
+        return 0;
     } catch ( exception & e ) {
         cout << "FAILED - ";
         cout << e.what() << endl;
+        return 1;
     }
 }
 
@@ -207,7 +213,7 @@ void doEraseFailed( HTTPClientSession & session, vector<string> & ids ) {
     doRequest( session, request, &body, reply );
 }
 
-void testFailureHanding( HTTPClientSession & session ){
+int testFailureHanding( HTTPClientSession & session ){
     cout << "testFailureHanding: ";
     cout.flush();
 
@@ -259,13 +265,15 @@ void testFailureHanding( HTTPClientSession & session ){
         }
 
         cout << "OK\n";
+        return 0;
     } catch ( exception & e ) {
         cout << "FAILED - ";
         cout << e.what() << endl;
+        return 1;
     }
 }
 
-void testPingSpeed( HTTPClientSession & session ){
+int testPingSpeed( HTTPClientSession & session ){
     cout << "testPingSpeed: ";
     cout.flush();
 
@@ -283,13 +291,15 @@ void testPingSpeed( HTTPClientSession & session ){
         chrono::duration<double> diff = t2 - t1;
 
         cout << diff.count() << " sec, " << (5000/diff.count()) << " req/sec\n";
+        return 0;
     } catch ( exception & e ) {
         cout << "FAILED - ";
         cout << e.what() << endl;
+        return 1;
     }
 }
 
-void testPushPopSpeed( HTTPClientSession & session ){
+int testPushPopSpeed( HTTPClientSession & session ){
     cout << "testPushPopSpeed: ";
     cout.flush();
 
@@ -307,39 +317,39 @@ void testPushPopSpeed( HTTPClientSession & session ){
         chrono::duration<double> diff = t2 - t1;
 
         cout << diff.count() << " sec, " << (4000/diff.count()) << " req/sec\n";
+        return 0;
     } catch ( exception & e ) {
         cout << "FAILED - ";
         cout << e.what() << endl;
+        return 1;
     }
 }
 
 int main( int argc, char ** argv ) {
+    int ec = 0;
+
     try {
         Poco::URI uri("http://localhost:8080");
         HTTPClientSession session( uri.getHost(), uri.getPort());
         session.setKeepAlive( true );
         session.setKeepAliveTimeout( Poco::Timespan( 5, 0 ));
 
-#if 1
-        testCount( session, 0, 0 );
-        testPush( session, 0, 100 );
-        testCount( session, 100, 0 );
-        testPop( session, 0, 100 );
-        testCount( session, 0, 0 );
-        testFailureHanding( session );
-        testPingSpeed( session );
-        testPushPopSpeed( session );
-#else
-        testPingSpeed( session );
-        testPushPopSpeed( session );
-#endif
+        ec |= testCount( session, 0, 0 );
+        ec |= testPush( session, 0, 100 );
+        ec |= testCount( session, 100, 0 );
+        ec |= testPop( session, 0, 100 );
+        ec |= testCount( session, 0, 0 );
+        ec |= testFailureHanding( session );
+        ec |= testPingSpeed( session );
+        ec |= testPushPopSpeed( session );
+
     } catch ( const Poco::Exception & e ) {
         cerr << "Poco exception: " << e.displayText() << endl;
-        abort();
+        ec = 1;
     } catch ( const exception & e ) {
         cerr << "Exception: " << e.what() << endl;
-        abort();
+        ec = 1;
     }
 
-    return 0;
+    return ec;
 }

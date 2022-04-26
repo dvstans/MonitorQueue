@@ -30,3 +30,16 @@ cc_test(
     linkopts = ["-lpthread"]
 )
 
+py_test(
+    name = "test_api",
+    size = "small",
+    srcs = ["test_api.py"],
+    data = [
+        "//server:mqserver",
+        "//server:mqclient"
+    ],
+    args = [
+        "$(location //server:mqserver)",
+        "$(location //server:mqclient)"
+    ]
+)
